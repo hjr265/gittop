@@ -2,6 +2,7 @@ package main
 
 import (
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/go-git/go-git/v5"
@@ -14,10 +15,20 @@ type DayStat struct {
 	Count int
 }
 
-// CollectDailyStats walks the entire commit log reachable from HEAD and
-// returns daily commit counts sorted ascending by date. Zero-count days
-// are filled in so charts have no gaps.
-func CollectDailyStats(repo *git.Repository) ([]DayStat, error) {
+// CommitInfo holds metadata for a single commit.
+type CommitInfo struct {
+	Hash    string
+	Author  string
+	Email   string
+	Date    time.Time
+	Message string
+	Files   []string // populated only when needed (path filter)
+}
+
+// CollectCommits walks the entire commit log reachable from HEAD and
+// returns per-commit metadata. If needFiles is true, each commit's
+// changed file paths are computed (slower).
+func CollectCommits(repo *git.Repository, needFiles bool) ([]CommitInfo, error) {
 	ref, err := repo.Head()
 	if err != nil {
 		return nil, err
@@ -28,32 +39,105 @@ func CollectDailyStats(repo *git.Repository) ([]DayStat, error) {
 		return nil, err
 	}
 
-	counts := make(map[time.Time]int)
-	var earliest time.Time
+	var commits []CommitInfo
 	err = iter.ForEach(func(c *object.Commit) error {
-		d := truncateToDay(c.Author.When)
-		counts[d]++
-		if earliest.IsZero() || d.Before(earliest) {
-			earliest = d
+		ci := CommitInfo{
+			Hash:    c.Hash.String(),
+			Author:  c.Author.Name,
+			Email:   c.Author.Email,
+			Date:    truncateToDay(c.Author.When),
+			Message: strings.TrimSpace(c.Message),
 		}
+		if needFiles {
+			ci.Files = commitFiles(c)
+		}
+		commits = append(commits, ci)
 		return nil
 	})
 	if err != nil {
 		return nil, err
 	}
 
-	if earliest.IsZero() {
-		return nil, nil
+	return commits, nil
+}
+
+// commitFiles returns the list of file paths changed by a commit.
+func commitFiles(c *object.Commit) []string {
+	tree, err := c.Tree()
+	if err != nil {
+		return nil
 	}
 
-	// Fill in all days from earliest commit to today.
+	var parentTree *object.Tree
+	if c.NumParents() > 0 {
+		parent, err := c.Parents().Next()
+		if err == nil {
+			parentTree, _ = parent.Tree()
+		}
+	}
+
+	if parentTree == nil {
+		// Root commit — list all files.
+		var files []string
+		tree.Files().ForEach(func(f *object.File) error {
+			files = append(files, f.Name)
+			return nil
+		})
+		return files
+	}
+
+	changes, err := parentTree.Diff(tree)
+	if err != nil {
+		return nil
+	}
+
+	var files []string
+	for _, ch := range changes {
+		if ch.From.Name != "" {
+			files = append(files, ch.From.Name)
+		}
+		if ch.To.Name != "" && ch.To.Name != ch.From.Name {
+			files = append(files, ch.To.Name)
+		}
+	}
+	return files
+}
+
+// CommitsToDailyStats aggregates commits into daily counts.
+func CommitsToDailyStats(commits []CommitInfo) []DayStat {
+	if len(commits) == 0 {
+		return nil
+	}
+
+	counts := make(map[time.Time]int)
+	var earliest time.Time
+	for _, c := range commits {
+		counts[c.Date]++
+		if earliest.IsZero() || c.Date.Before(earliest) {
+			earliest = c.Date
+		}
+	}
+
 	now := truncateToDay(time.Now())
 	var stats []DayStat
 	for d := earliest; !d.After(now); d = d.AddDate(0, 0, 1) {
 		stats = append(stats, DayStat{Date: d, Count: counts[d]})
 	}
+	return stats
+}
 
-	return stats, nil
+// FilterCommits returns only commits matching the given filter expression.
+func FilterCommits(commits []CommitInfo, expr FilterExpr) []CommitInfo {
+	if expr == nil {
+		return commits
+	}
+	var result []CommitInfo
+	for i := range commits {
+		if expr.Match(&commits[i]) {
+			result = append(result, commits[i])
+		}
+	}
+	return result
 }
 
 // Granularity represents the time bucket size for chart aggregation.
@@ -112,7 +196,6 @@ func AggregateStats(daily []DayStat, g Granularity) []DayStat {
 func bucketKey(t time.Time, g Granularity) time.Time {
 	switch g {
 	case GranularityWeekly:
-		// Week starts on Monday.
 		weekday := int(t.Weekday())
 		if weekday == 0 {
 			weekday = 7
@@ -131,9 +214,3 @@ func bucketKey(t time.Time, g Granularity) time.Time {
 func truncateToDay(t time.Time) time.Time {
 	return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, time.UTC)
 }
-
-var errStop = &stopError{}
-
-type stopError struct{}
-
-func (e *stopError) Error() string { return "stop" }

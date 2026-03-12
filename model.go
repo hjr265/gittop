@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/go-git/go-git/v5"
@@ -12,13 +13,12 @@ import (
 
 const (
 	chromeTopHeight    = 2 // top bar + tab bar
-	chromeBottomHeight = 1 // keybinding bar
+	chromeBottomHeight = 1 // keybinding bar or filter input
 )
 
 type model struct {
 	repo     *git.Repository
 	repoPath string
-	stats    []DayStat
 	width    int
 	height   int
 	err      error
@@ -29,22 +29,51 @@ type model struct {
 
 	branch    string
 	fetchedAt time.Time
+
+	// Commit data.
+	commits         []CommitInfo // all commits (without files)
+	commitsWithFiles []CommitInfo // all commits (with files, lazily populated)
+	stats           []DayStat   // unfiltered daily stats
+
+	// Filter state.
+	filterInput   textinput.Model
+	filterActive  bool // true when typing in filter input
+	filterQuery   string
+	filterExpr    FilterExpr
+	filterErr     error
+	filteredStats []DayStat
+	filtering     bool // true while re-scanning with files
+}
+
+type commitsMsg struct {
+	commits []CommitInfo
+	branch  string
+	err     error
+}
+
+// commitsWithFilesMsg is sent when a re-scan with file info completes.
+type commitsWithFilesMsg struct {
+	commits []CommitInfo
+	err     error
 }
 
 type statsMsg struct {
-	stats  []DayStat
-	branch string
-	err    error
+	stats []DayStat
 }
 
 func newModel(repo *git.Repository, path string) model {
+	ti := textinput.New()
+	ti.Placeholder = `author:"name" and ("fix" or "bug") and path:*.go`
+	ti.CharLimit = 256
+	ti.Width = 80
+
 	m := model{
 		repo:      repo,
 		repoPath:  path,
 		loading:   true,
 		activeTab: TabSummary,
+		filterInput: ti,
 	}
-	// Pages are initialized after stats are loaded.
 	m.pages = []Page{
 		newSummaryPage(),
 		newActivityPage(),
@@ -58,7 +87,7 @@ func newModel(repo *git.Repository, path string) model {
 
 func (m model) Init() tea.Cmd {
 	return func() tea.Msg {
-		stats, err := CollectDailyStats(m.repo)
+		commits, err := CollectCommits(m.repo, false)
 		branch := ""
 		if ref, e := m.repo.Head(); e == nil {
 			if ref.Name().IsBranch() {
@@ -67,7 +96,54 @@ func (m model) Init() tea.Cmd {
 				branch = ref.Hash().String()[:8]
 			}
 		}
-		return statsMsg{stats: stats, branch: branch, err: err}
+		return commitsMsg{commits: commits, branch: branch, err: err}
+	}
+}
+
+func (m *model) applyFilter() {
+	m.filterErr = nil
+	if m.filterQuery == "" {
+		m.filterExpr = nil
+		m.filteredStats = m.stats
+		m.propagateStats()
+		return
+	}
+	expr, err := ParseFilter(m.filterQuery)
+	if err != nil {
+		m.filterErr = err
+		return
+	}
+	m.filterExpr = expr
+	m.recomputeFilteredStats()
+}
+
+func (m *model) recomputeFilteredStats() {
+	if m.filterExpr == nil {
+		m.filteredStats = m.stats
+		m.propagateStats()
+		return
+	}
+
+	// If the filter needs file info and we don't have it yet, trigger a re-scan.
+	source := m.commits
+	if FilterNeedsFiles(m.filterExpr) {
+		if m.commitsWithFiles != nil {
+			source = m.commitsWithFiles
+		}
+		// If we haven't loaded files yet, filteredStats will be approximate
+		// (path filters won't match). The re-scan command is triggered in Update.
+	}
+
+	filtered := FilterCommits(source, m.filterExpr)
+	m.filteredStats = CommitsToDailyStats(filtered)
+	m.propagateStats()
+}
+
+func (m *model) propagateStats() {
+	msg := statsMsg{stats: m.filteredStats}
+	for i, p := range m.pages {
+		updated, _ := p.Update(msg)
+		m.pages[i] = updated
 	}
 }
 
@@ -76,29 +152,79 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
+		m.filterInput.Width = m.width - 20
+		if m.filterInput.Width < 20 {
+			m.filterInput.Width = 20
+		}
 
-	case statsMsg:
-		m.stats = msg.stats
+	case commitsMsg:
+		m.commits = msg.commits
 		m.branch = msg.branch
 		m.err = msg.err
 		m.loading = false
 		m.fetchedAt = time.Now()
+		m.stats = CommitsToDailyStats(m.commits)
+		m.filteredStats = m.stats
+		m.propagateStats()
+		return m, nil
 
-		// Propagate stats to pages that need them.
-		var cmds []tea.Cmd
-		for i, p := range m.pages {
-			updated, cmd := p.Update(msg)
-			m.pages[i] = updated
-			if cmd != nil {
-				cmds = append(cmds, cmd)
-			}
+	case commitsWithFilesMsg:
+		m.filtering = false
+		if msg.err == nil {
+			m.commitsWithFiles = msg.commits
+			m.recomputeFilteredStats()
 		}
-		return m, tea.Batch(cmds...)
+		return m, nil
 
 	case tea.KeyMsg:
+		// Filter input mode.
+		if m.filterActive {
+			switch msg.String() {
+			case "enter":
+				m.filterQuery = m.filterInput.Value()
+				m.filterActive = false
+				m.filterInput.Blur()
+				m.applyFilter()
+
+				// If filter needs files and we don't have them, trigger re-scan.
+				if m.filterExpr != nil && FilterNeedsFiles(m.filterExpr) && m.commitsWithFiles == nil && !m.filtering {
+					m.filtering = true
+					return m, func() tea.Msg {
+						commits, err := CollectCommits(m.repo, true)
+						return commitsWithFilesMsg{commits: commits, err: err}
+					}
+				}
+				return m, nil
+			case "esc":
+				m.filterActive = false
+				m.filterInput.Blur()
+				return m, nil
+			default:
+				var cmd tea.Cmd
+				m.filterInput, cmd = m.filterInput.Update(msg)
+				return m, cmd
+			}
+		}
+
+		// Normal mode.
 		switch msg.String() {
 		case "q", "ctrl+c":
 			return m, tea.Quit
+		case "/":
+			m.filterActive = true
+			m.filterInput.Focus()
+			return m, m.filterInput.Cursor.BlinkCmd()
+		case "esc":
+			// Clear filter.
+			if m.filterQuery != "" {
+				m.filterQuery = ""
+				m.filterExpr = nil
+				m.filterErr = nil
+				m.filterInput.SetValue("")
+				m.filteredStats = m.stats
+				m.propagateStats()
+				return m, nil
+			}
 		case "1":
 			m.activeTab = TabSummary
 		case "2":
@@ -166,7 +292,7 @@ func (m model) View() string {
 	b.WriteString(strings.Join(lines, "\n"))
 	b.WriteString("\n")
 
-	// Bottom bar.
+	// Bottom bar or filter input.
 	b.WriteString(m.viewBottomBar())
 
 	return b.String()
@@ -192,15 +318,28 @@ func (m model) viewTopBar() string {
 		dimOnBar.Render("  ") +
 		branchStyle.Render(m.branch)
 
+	// Show filter indicator.
+	filterIndicator := ""
+	if m.filterQuery != "" {
+		filterStyle := lipgloss.NewStyle().
+			Background(lipgloss.Color("236")).
+			Foreground(lipgloss.Color("214")).
+			Bold(true)
+		filterIndicator = dimOnBar.Render("  ") + filterStyle.Render("filter: "+m.filterQuery)
+	}
+	if m.filtering {
+		filterIndicator += dimOnBar.Render(" (scanning files...)")
+	}
+
 	right := dimOnBar.Render(m.fetchedAt.Format("15:04:05") + " ")
 
-	gap := m.width - lipgloss.Width(left) - lipgloss.Width(right)
+	gap := m.width - lipgloss.Width(left) - lipgloss.Width(filterIndicator) - lipgloss.Width(right)
 	if gap < 0 {
 		gap = 0
 	}
 	filler := lipgloss.NewStyle().Background(lipgloss.Color("236")).Render(strings.Repeat(" ", gap))
 
-	return left + filler + right
+	return left + filterIndicator + filler + right
 }
 
 func (m model) viewTabBar() string {
@@ -228,7 +367,6 @@ func (m model) viewTabBar() string {
 
 	tabContent := lipgloss.JoinHorizontal(lipgloss.Top, parts...)
 
-	// Fill remaining width.
 	gap := m.width - lipgloss.Width(tabContent)
 	if gap < 0 {
 		gap = 0
@@ -248,10 +386,34 @@ func (m model) viewBottomBar() string {
 		Foreground(lipgloss.Color("255")).
 		Bold(true)
 
+	// Filter input mode.
+	if m.filterActive {
+		promptStyle := lipgloss.NewStyle().
+			Background(lipgloss.Color("236")).
+			Foreground(lipgloss.Color("214")).
+			Bold(true)
+
+		inputView := m.filterInput.View()
+		content := promptStyle.Render(" / ") + inputView
+
+		gap := m.width - lipgloss.Width(content)
+		if gap < 0 {
+			gap = 0
+		}
+		filler := barStyle.Render(strings.Repeat(" ", gap))
+		return content + filler
+	}
+
+	// Normal bottom bar.
 	bindings := []struct{ key, desc string }{
 		{"1-6", "pages"},
 		{"tab", "next"},
+		{"/", "filter"},
 		{"q", "quit"},
+	}
+
+	if m.filterQuery != "" {
+		bindings = append(bindings, struct{ key, desc string }{"esc", "clear filter"})
 	}
 
 	// Page-specific bindings.
@@ -268,6 +430,15 @@ func (m model) viewBottomBar() string {
 	}
 
 	content := barStyle.Render("") + strings.Join(parts, barStyle.Render("  "))
+
+	// Show filter error if any.
+	if m.filterErr != nil {
+		errStyle := lipgloss.NewStyle().
+			Background(lipgloss.Color("236")).
+			Foreground(lipgloss.Color("196")).
+			Bold(true)
+		content += errStyle.Render("  " + m.filterErr.Error())
+	}
 
 	gap := m.width - lipgloss.Width(content)
 	if gap < 0 {
