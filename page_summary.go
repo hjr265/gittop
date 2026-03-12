@@ -9,21 +9,77 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
+// Range presets for the chart.
+type timeRange struct {
+	label string
+	days  int // 0 means "all time"
+}
+
+var rangePresets = []timeRange{
+	{"3m", 90},
+	{"6m", 180},
+	{"1y", 365},
+	{"2y", 730},
+	{"5y", 1825},
+	{"all", 0},
+}
+
+const defaultRangeIdx = 2 // 1y
+
 type summaryPage struct {
-	stats []DayStat
+	stats       []DayStat
+	granularity Granularity
+	rangeIdx    int
 }
 
 func newSummaryPage() *summaryPage {
-	return &summaryPage{}
+	return &summaryPage{rangeIdx: defaultRangeIdx}
 }
 
 func (p *summaryPage) Init() tea.Cmd { return nil }
 
 func (p *summaryPage) Update(msg tea.Msg) (Page, tea.Cmd) {
-	if msg, ok := msg.(statsMsg); ok {
+	switch msg := msg.(type) {
+	case statsMsg:
 		p.stats = msg.stats
+	case tea.KeyMsg:
+		switch msg.String() {
+		case "d":
+			p.granularity = GranularityDaily
+		case "w":
+			p.granularity = GranularityWeekly
+		case "m":
+			p.granularity = GranularityMonthly
+		case "y":
+			p.granularity = GranularityYearly
+		case "g":
+			p.granularity = p.granularity.Next()
+		case "+", "=":
+			if p.rangeIdx < len(rangePresets)-1 {
+				p.rangeIdx++
+			}
+		case "-", "_":
+			if p.rangeIdx > 0 {
+				p.rangeIdx--
+			}
+		}
 	}
 	return p, nil
+}
+
+// filteredStats returns stats trimmed to the selected range.
+func (p *summaryPage) filteredStats() []DayStat {
+	r := rangePresets[p.rangeIdx]
+	if r.days == 0 || len(p.stats) == 0 {
+		return p.stats
+	}
+	cutoff := truncateToDay(time.Now()).AddDate(0, 0, -r.days)
+	for i, s := range p.stats {
+		if !s.Date.Before(cutoff) {
+			return p.stats[i:]
+		}
+	}
+	return nil
 }
 
 func (p *summaryPage) View(width, height int) string {
@@ -31,14 +87,19 @@ func (p *summaryPage) View(width, height int) string {
 		return "\n  No data."
 	}
 
+	stats := p.filteredStats()
+	if len(stats) == 0 {
+		return "\n  No data in selected range."
+	}
+
 	var b strings.Builder
 
-	// Compute KPIs.
+	// Compute KPIs from filtered stats.
 	totalCommits := 0
 	peakCount := 0
 	peakDate := time.Time{}
 	activeDays := 0
-	for _, s := range p.stats {
+	for _, s := range stats {
 		totalCommits += s.Count
 		if s.Count > 0 {
 			activeDays++
@@ -50,8 +111,8 @@ func (p *summaryPage) View(width, height int) string {
 	}
 
 	// Time range.
-	first := p.stats[0].Date
-	last := p.stats[len(p.stats)-1].Date
+	first := stats[0].Date
+	last := stats[len(stats)-1].Date
 	repoSpan := last.Sub(first)
 	// KPI cards.
 	cards := []struct {
@@ -59,7 +120,7 @@ func (p *summaryPage) View(width, height int) string {
 		value string
 	}{
 		{"Total Commits", fmt.Sprintf("%d", totalCommits)},
-		{"Active Days", fmt.Sprintf("%d / %d", activeDays, len(p.stats))},
+		{"Active Days", fmt.Sprintf("%d / %d", activeDays, len(stats))},
 		{"Peak Day", fmt.Sprintf("%d (%s)", peakCount, peakDate.Format("Jan 2"))},
 		{"Time Span", fmt.Sprintf("%d days", int(repoSpan.Hours()/24))},
 	}
@@ -99,7 +160,20 @@ func (p *summaryPage) View(width, height int) string {
 	b.WriteString("\n\n")
 
 	// Bar chart.
-	b.WriteString(renderBarChart(p.stats, width, height-7))
+	aggregated := AggregateStats(stats, p.granularity)
+	b.WriteString(renderBarChart(aggregated, p.granularity, p.rangeLabel(), width, height-7))
 
 	return b.String()
+}
+
+func (p *summaryPage) rangeLabel() string {
+	var parts []string
+	for i, r := range rangePresets {
+		if i == p.rangeIdx {
+			parts = append(parts, boldStyle.Render(r.label))
+		} else {
+			parts = append(parts, dimStyle.Render(r.label))
+		}
+	}
+	return strings.Join(parts, dimStyle.Render(" / "))
 }

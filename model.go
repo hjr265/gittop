@@ -13,7 +13,6 @@ import (
 const (
 	chromeTopHeight    = 2 // top bar + tab bar
 	chromeBottomHeight = 1 // keybinding bar
-	maxFetchDays       = 365
 )
 
 type model struct {
@@ -59,7 +58,7 @@ func newModel(repo *git.Repository, path string) model {
 
 func (m model) Init() tea.Cmd {
 	return func() tea.Msg {
-		stats, err := CollectDailyStats(m.repo, maxFetchDays)
+		stats, err := CollectDailyStats(m.repo)
 		branch := ""
 		if ref, e := m.repo.Head(); e == nil {
 			if ref.Name().IsBranch() {
@@ -253,6 +252,14 @@ func (m model) viewBottomBar() string {
 		{"1-6", "pages"},
 		{"tab", "next"},
 		{"q", "quit"},
+	}
+
+	// Page-specific bindings.
+	if m.activeTab == TabSummary {
+		bindings = append(bindings,
+			struct{ key, desc string }{"d/w/m/y", "granularity"},
+			struct{ key, desc string }{"+/-", "range"},
+		)
 	}
 
 	var parts []string

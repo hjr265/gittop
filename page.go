@@ -53,9 +53,9 @@ var (
 	chartPadding = 10
 )
 
-// renderBarChart renders a full bar chart of daily commit stats.
+// renderBarChart renders a full bar chart of commit stats.
 // width and height are the available space for the chart.
-func renderBarChart(allStats []DayStat, width, height int) string {
+func renderBarChart(allStats []DayStat, granularity Granularity, rangeLabel string, width, height int) string {
 	if len(allStats) == 0 {
 		return "\n  No commit data."
 	}
@@ -114,7 +114,21 @@ func renderBarChart(allStats []DayStat, width, height int) string {
 
 	var b strings.Builder
 
-	b.WriteString(dimStyle.Render(fmt.Sprintf("  Commits over the last %d days", len(stats))))
+	// Subtitle with granularity indicator.
+	granLabels := []string{"[d]aily", "[w]eekly", "[m]onthly", "[y]early"}
+	var granParts []string
+	for i, l := range granLabels {
+		if Granularity(i) == granularity {
+			granParts = append(granParts, boldStyle.Render(l))
+		} else {
+			granParts = append(granParts, dimStyle.Render(l))
+		}
+	}
+	b.WriteString(fmt.Sprintf("  %s  %s    %s  %s",
+		dimStyle.Render("Commits"),
+		strings.Join(granParts, dimStyle.Render(" / ")),
+		dimStyle.Render("Range"),
+		rangeLabel))
 	b.WriteString("\n\n")
 
 	for r := 0; r < chartHeight; r++ {
@@ -160,15 +174,34 @@ func renderBarChart(allStats []DayStat, width, height int) string {
 	for i := range monthLine {
 		monthLine[i] = ' '
 	}
+	lastLabel := -10 // track last label position to avoid overlap
 	for i, s := range stats {
-		if s.Date.Day() == 1 || i == 0 {
-			label := s.Date.Format("Jan")
+		var label string
+		showLabel := false
+
+		switch granularity {
+		case GranularityYearly:
+			showLabel = i == 0 || stats[i].Date.Year() != stats[i-1].Date.Year()
+			label = s.Date.Format("2006")
+		case GranularityMonthly:
+			showLabel = i == 0 || s.Date.Month() != stats[i-1].Date.Month()
+			label = s.Date.Format("Jan")
 			if s.Date.Month() == time.January || i == 0 {
 				label = s.Date.Format("Jan 06")
 			}
+		default:
+			showLabel = s.Date.Day() == 1 || i == 0
+			label = s.Date.Format("Jan")
+			if s.Date.Month() == time.January || i == 0 {
+				label = s.Date.Format("Jan 06")
+			}
+		}
+
+		if showLabel && i-lastLabel >= len(label)+1 {
 			for j := 0; j < len(label) && i+j < len(monthLine); j++ {
 				monthLine[i+j] = label[j]
 			}
+			lastLabel = i
 		}
 	}
 	b.WriteString(fmt.Sprintf("  %*s  ", axisWidth, ""))
@@ -177,9 +210,16 @@ func renderBarChart(allStats []DayStat, width, height int) string {
 
 	peakStr := ""
 	if !peakDate.IsZero() {
-		peakStr = fmt.Sprintf("  Peak: %d (%s)", maxCount, peakDate.Format("Jan 2"))
+		peakFmt := peakDate.Format("Jan 2")
+		if granularity == GranularityYearly {
+			peakFmt = peakDate.Format("2006")
+		} else if granularity == GranularityMonthly {
+			peakFmt = peakDate.Format("Jan 2006")
+		}
+		peakStr = fmt.Sprintf("  Peak: %d (%s)", maxCount, peakFmt)
 	}
-	b.WriteString(dimStyle.Render(fmt.Sprintf("  Total: %d commits%s", totalCommits, peakStr)))
+	b.WriteString(dimStyle.Render(fmt.Sprintf("  Total: %d commits  %d %s periods%s",
+		totalCommits, len(stats), granularity, peakStr)))
 
 	return b.String()
 }
