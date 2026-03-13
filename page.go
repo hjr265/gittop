@@ -23,11 +23,11 @@ const (
 	TabContributors = 2
 	TabBranches     = 3
 	TabFiles        = 4
-	TabLog          = 5
+	TabCommits      = 5
 	TabHealth       = 6
 )
 
-var tabNames = []string{"Summary", "Activity", "Contributors", "Branches", "Files", "Log", "Health"}
+var tabNames = []string{"Summary", "Activity", "Contributors", "Branches", "Files", "Commits", "Health"}
 
 // Shared styles.
 var (

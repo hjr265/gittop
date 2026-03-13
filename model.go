@@ -92,7 +92,7 @@ func newModel(repo *git.Repository, path string) model {
 		newContributorsPage(),
 		newBranchesPage(),
 		newFilesPage(),
-		newLogPage(),
+		newCommitsPage(),
 		newHealthPage(),
 	}
 	return m
@@ -309,7 +309,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "5":
 			m.activeTab = TabFiles
 		case "6":
-			m.activeTab = TabLog
+			m.activeTab = TabCommits
 		case "7":
 			m.activeTab = TabHealth
 		case "+", "=":
@@ -540,6 +540,12 @@ func (m model) viewBottomBar() string {
 	if m.activeTab == TabActivity {
 		bindings = append(bindings,
 			struct{ key, desc string }{"v", "cycle view"},
+		)
+	}
+	if m.activeTab == TabCommits {
+		bindings = append(bindings,
+			struct{ key, desc string }{"j/k", "scroll"},
+			struct{ key, desc string }{"g/G", "top/bottom"},
 		)
 	}
 	if m.activeTab == TabHealth {
