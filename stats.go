@@ -428,3 +428,85 @@ func computeAheadBehind(repo *git.Repository, branchHash, baseHash plumbing.Hash
 
 	return ahead, behind
 }
+
+// TagInfo holds metadata for a single tag/release.
+type TagInfo struct {
+	Name       string
+	Date       time.Time // tagger date for annotated, commit date for lightweight
+	CommitHash string
+	Annotated  bool
+	Message    string // tag message (annotated only)
+}
+
+// CollectTags enumerates all tags and returns them sorted newest first.
+func CollectTags(repo *git.Repository) ([]TagInfo, error) {
+	iter, err := repo.Tags()
+	if err != nil {
+		return nil, err
+	}
+
+	var tags []TagInfo
+	err = iter.ForEach(func(ref *plumbing.Reference) error {
+		name := ref.Name().Short()
+
+		// Try annotated tag first.
+		tagObj, err := repo.TagObject(ref.Hash())
+		if err == nil {
+			commit, cerr := tagObj.Commit()
+			commitHash := ""
+			if cerr == nil {
+				commitHash = commit.Hash.String()
+			}
+			tags = append(tags, TagInfo{
+				Name:       name,
+				Date:       tagObj.Tagger.When,
+				CommitHash: commitHash,
+				Annotated:  true,
+				Message:    strings.TrimSpace(tagObj.Message),
+			})
+			return nil
+		}
+
+		// Lightweight tag — resolve to commit.
+		commit, err := repo.CommitObject(ref.Hash())
+		if err != nil {
+			return nil
+		}
+		tags = append(tags, TagInfo{
+			Name:       name,
+			Date:       commit.Author.When,
+			CommitHash: commit.Hash.String(),
+		})
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	sort.Slice(tags, func(i, j int) bool {
+		return tags[i].Date.After(tags[j].Date)
+	})
+	return tags, nil
+}
+
+// CountCommitsSince counts commits from HEAD that are after the given hash.
+func CountCommitsSince(repo *git.Repository, sinceHash string) int {
+	ref, err := repo.Head()
+	if err != nil {
+		return 0
+	}
+
+	count := 0
+	iter, err := repo.Log(&git.LogOptions{From: ref.Hash()})
+	if err != nil {
+		return 0
+	}
+	iter.ForEach(func(c *object.Commit) error {
+		if c.Hash.String() == sinceHash {
+			return io.EOF
+		}
+		count++
+		return nil
+	})
+	return count
+}

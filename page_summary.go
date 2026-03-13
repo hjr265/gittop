@@ -27,8 +27,11 @@ var rangePresets = []timeRange{
 const defaultRangeIdx = 2 // 1y
 
 type summaryPage struct {
-	stats       []DayStat
-	granularity Granularity
+	stats        []DayStat
+	granularity  Granularity
+	latestTag    string // name of latest tag
+	tagDate      time.Time
+	commitsSince int // commits since latest tag
 }
 
 func newSummaryPage() *summaryPage {
@@ -41,6 +44,12 @@ func (p *summaryPage) Update(msg tea.Msg) (Page, tea.Cmd) {
 	switch msg := msg.(type) {
 	case statsMsg:
 		p.stats = msg.stats
+	case tagsDataMsg:
+		if msg.err == nil && len(msg.tags) > 0 {
+			p.latestTag = msg.tags[0].Name
+			p.tagDate = msg.tags[0].Date
+			p.commitsSince = msg.commitsSince
+		}
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "d":
@@ -96,6 +105,16 @@ func (p *summaryPage) View(width, height int) string {
 		{"Active Days", fmt.Sprintf("%d / %d", activeDays, len(stats))},
 		{"Peak Day", fmt.Sprintf("%d (%s)", peakCount, peakDate.Format("Jan 2"))},
 		{"Time Span", fmt.Sprintf("%d days", int(repoSpan.Hours()/24))},
+	}
+	if p.latestTag != "" {
+		tagValue := p.latestTag
+		if p.commitsSince > 0 {
+			tagValue += fmt.Sprintf(" +%d", p.commitsSince)
+		}
+		cards = append(cards, struct {
+			label string
+			value string
+		}{"Latest Release", tagValue})
 	}
 
 	// Each card has 2 cols border + 2 cols padding = 4 cols of chrome.

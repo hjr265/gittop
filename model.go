@@ -50,6 +50,12 @@ type model struct {
 	branchesLoaded  bool
 	branchesLoading bool
 
+	// Tag/release data.
+	tags        []TagInfo
+	commitsSince int // commits since latest tag (unfiltered)
+	tagsLoaded  bool
+	tagsLoading bool
+
 	// Health data.
 	healthLoaded  bool
 	healthLoading bool
@@ -69,6 +75,12 @@ type commitsWithFilesMsg struct {
 
 type statsMsg struct {
 	stats []DayStat
+}
+
+type tagsDataMsg struct {
+	tags          []TagInfo
+	commitsSince  int // commits since latest tag
+	err           error
 }
 
 type commitsDataMsg struct {
@@ -96,6 +108,7 @@ func newModel(repo *git.Repository, path string) model {
 		newContributorsPage(),
 		newBranchesPage(),
 		newHealthPage(),
+		newReleasesPage(),
 		newCommitsPage(),
 	}
 	return m
@@ -187,6 +200,50 @@ func (m *model) propagateStats() {
 		updated, _ := p.Update(cdMsg)
 		m.pages[i] = updated
 	}
+
+	// Re-propagate tags with range cutoff and filter.
+	if m.tagsLoaded {
+		m.propagateTags(source)
+	}
+}
+
+func (m *model) propagateTags(filteredCommits []CommitInfo) {
+	cutoff := m.rangeCutoff()
+	filtered := applyRangeCutoffTags(m.tags, cutoff)
+
+	// If a filter is active, only keep tags whose commit is in the filtered set.
+	if m.filterExpr != nil && len(filteredCommits) > 0 {
+		hashes := make(map[string]bool, len(filteredCommits))
+		for _, c := range filteredCommits {
+			hashes[c.Hash] = true
+		}
+		var matched []TagInfo
+		for _, t := range filtered {
+			if hashes[t.CommitHash] {
+				matched = append(matched, t)
+			}
+		}
+		filtered = matched
+	}
+
+	msg := tagsDataMsg{tags: filtered, commitsSince: m.commitsSince}
+	for i, p := range m.pages {
+		updated, _ := p.Update(msg)
+		m.pages[i] = updated
+	}
+}
+
+func applyRangeCutoffTags(tags []TagInfo, cutoff time.Time) []TagInfo {
+	if cutoff.IsZero() || len(tags) == 0 {
+		return tags
+	}
+	var result []TagInfo
+	for _, t := range tags {
+		if !t.Date.Before(cutoff) {
+			result = append(result, t)
+		}
+	}
+	return result
 }
 
 func applyRangeCutoff(stats []DayStat, cutoff time.Time) []DayStat {
@@ -232,6 +289,19 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.stats = CommitsToDailyStats(m.commits)
 		m.filteredStats = m.stats
 		m.propagateStats()
+		// Start loading tags in background.
+		if !m.tagsLoaded && !m.tagsLoading {
+			m.tagsLoading = true
+			repo := m.repo
+			return m, func() tea.Msg {
+				tags, err := CollectTags(repo)
+				commitsSince := 0
+				if err == nil && len(tags) > 0 && tags[0].CommitHash != "" {
+					commitsSince = CountCommitsSince(repo, tags[0].CommitHash)
+				}
+				return tagsDataMsg{tags: tags, commitsSince: commitsSince, err: err}
+			}
+		}
 		return m, nil
 
 	case commitsWithFilesMsg:
@@ -249,6 +319,24 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			updated, _ := p.Update(msg)
 			m.pages[i] = updated
 		}
+		return m, nil
+
+	case tagsDataMsg:
+		m.tagsLoading = false
+		m.tagsLoaded = true
+		m.tags = msg.tags
+		m.commitsSince = msg.commitsSince
+		// Build filtered commits for tag filtering.
+		cutoff := m.rangeCutoff()
+		source := m.commits
+		if m.commitsWithFiles != nil {
+			source = m.commitsWithFiles
+		}
+		if m.filterExpr != nil {
+			source = FilterCommits(source, m.filterExpr)
+		}
+		source = applyRangeCutoffCommits(source, cutoff)
+		m.propagateTags(source)
 		return m, nil
 
 	case healthTreeMsg:
@@ -321,6 +409,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "5":
 			m.activeTab = TabHealth
 		case "6":
+			m.activeTab = TabReleases
+		case "7":
 			m.activeTab = TabCommits
 		case "+", "=":
 			if m.rangeIdx < len(rangePresets)-1 {
@@ -550,7 +640,7 @@ func (m model) viewBottomBar() string {
 
 	// Normal bottom bar.
 	bindings := []struct{ key, desc string }{
-		{"1-6", "pages"},
+		{"1-7", "pages"},
 		{"tab", "next"},
 		{"+/-", "range"},
 		{"/", "filter"},
@@ -579,6 +669,12 @@ func (m model) viewBottomBar() string {
 		)
 	}
 	if m.activeTab == TabContributors {
+		bindings = append(bindings,
+			struct{ key, desc string }{"v", "cycle view"},
+			struct{ key, desc string }{"j/k", "scroll"},
+		)
+	}
+	if m.activeTab == TabReleases {
 		bindings = append(bindings,
 			struct{ key, desc string }{"v", "cycle view"},
 			struct{ key, desc string }{"j/k", "scroll"},
