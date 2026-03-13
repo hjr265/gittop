@@ -338,6 +338,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 
+	// Trigger file data loading for Contributors ownership view.
+	if m.activeTab == TabContributors && m.commitsWithFiles == nil && !m.filtering {
+		m.filtering = true
+		repo := m.repo
+		return m, func() tea.Msg {
+			commits, err := CollectCommits(repo, true)
+			return commitsWithFilesMsg{commits: commits, err: err}
+		}
+	}
+
 	// Trigger health data loading when Health tab is active.
 	if m.activeTab == TabHealth && !m.healthLoaded && !m.healthLoading {
 		m.healthLoading = true
@@ -540,6 +550,12 @@ func (m model) viewBottomBar() string {
 	if m.activeTab == TabActivity {
 		bindings = append(bindings,
 			struct{ key, desc string }{"v", "cycle view"},
+		)
+	}
+	if m.activeTab == TabContributors {
+		bindings = append(bindings,
+			struct{ key, desc string }{"v", "cycle view"},
+			struct{ key, desc string }{"j/k", "scroll"},
 		)
 	}
 	if m.activeTab == TabCommits {
