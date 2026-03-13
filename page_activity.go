@@ -194,9 +194,6 @@ func (p *activityPage) renderHeatmap(width, height int) string {
 	if maxWeeks < 4 {
 		maxWeeks = 4
 	}
-	if maxWeeks > 53 {
-		maxWeeks = 53
-	}
 
 	today := truncateToDay(time.Now())
 
@@ -205,6 +202,21 @@ func (p *activityPage) renderHeatmap(width, height int) string {
 		endDay = endDay.AddDate(0, 0, 1)
 	}
 	startDay := endDay.AddDate(0, 0, -(maxWeeks*7 - 1))
+
+	// Clamp start to earliest stat date so we don't show empty weeks.
+	if len(p.stats) > 0 {
+		earliest := p.stats[0].Date
+		for earliest.Weekday() != time.Sunday {
+			earliest = earliest.AddDate(0, 0, -1)
+		}
+		if earliest.After(startDay) {
+			startDay = earliest
+			maxWeeks = int(endDay.Sub(startDay).Hours()/24)/7 + 1
+			if maxWeeks < 4 {
+				maxWeeks = 4
+			}
+		}
+	}
 
 	maxCount := 0
 	for d := startDay; !d.After(endDay); d = d.AddDate(0, 0, 1) {
