@@ -40,14 +40,16 @@ type FieldExpr struct {
 var filterLexer = lexer.MustSimple([]lexer.SimpleRule{
 	{Name: "Whitespace", Pattern: `\s+`},
 	{Name: "String", Pattern: `"[^"]*"`},
-	{Name: "Pattern", Pattern: `[a-zA-Z0-9_\-.*/?]+`},
+	{Name: "Keyword", Pattern: `(?i)(?:and|or|not)\b`},
 	{Name: "Ident", Pattern: `[a-zA-Z_][a-zA-Z0-9_\-]*`},
+	{Name: "Pattern", Pattern: `[a-zA-Z0-9_\-]*[.*/?][a-zA-Z0-9_\-.*/?]*`},
 	{Name: "Punct", Pattern: `[():]`},
 })
 
 var filterParser = participle.MustBuild[Query](
 	participle.Lexer(filterLexer),
-	participle.CaseInsensitive("Ident"),
+	participle.Elide("Whitespace"),
+	participle.CaseInsensitive("Keyword", "Ident"),
 	participle.Unquote("String"),
 )
 
