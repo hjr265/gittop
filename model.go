@@ -61,6 +61,10 @@ type statsMsg struct {
 	stats []DayStat
 }
 
+type commitsDataMsg struct {
+	commits []CommitInfo
+}
+
 func newModel(repo *git.Repository, path string) model {
 	ti := textinput.New()
 	ti.Placeholder = `author:"name" and ("fix" or "bug") and path:*.go`
@@ -140,9 +144,23 @@ func (m *model) recomputeFilteredStats() {
 }
 
 func (m *model) propagateStats() {
-	msg := statsMsg{stats: m.filteredStats}
+	statsMsg := statsMsg{stats: m.filteredStats}
 	for i, p := range m.pages {
-		updated, _ := p.Update(msg)
+		updated, _ := p.Update(statsMsg)
+		m.pages[i] = updated
+	}
+
+	// Propagate filtered commits for pages that need them.
+	source := m.commits
+	if m.filterExpr != nil {
+		if FilterNeedsFiles(m.filterExpr) && m.commitsWithFiles != nil {
+			source = m.commitsWithFiles
+		}
+		source = FilterCommits(source, m.filterExpr)
+	}
+	cdMsg := commitsDataMsg{commits: source}
+	for i, p := range m.pages {
+		updated, _ := p.Update(cdMsg)
 		m.pages[i] = updated
 	}
 }
@@ -421,6 +439,11 @@ func (m model) viewBottomBar() string {
 		bindings = append(bindings,
 			struct{ key, desc string }{"d/w/m/y", "granularity"},
 			struct{ key, desc string }{"+/-", "range"},
+		)
+	}
+	if m.activeTab == TabActivity {
+		bindings = append(bindings,
+			struct{ key, desc string }{"v", "cycle view"},
 		)
 	}
 

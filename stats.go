@@ -21,6 +21,9 @@ type CommitInfo struct {
 	Author  string
 	Email   string
 	Date    time.Time
+	Hour    int
+	Weekday time.Weekday
+	Month   time.Month
 	Message string
 	Files   []string // populated only when needed (path filter)
 }
@@ -41,11 +44,15 @@ func CollectCommits(repo *git.Repository, needFiles bool) ([]CommitInfo, error) 
 
 	var commits []CommitInfo
 	err = iter.ForEach(func(c *object.Commit) error {
+		when := c.Author.When
 		ci := CommitInfo{
 			Hash:    c.Hash.String(),
 			Author:  c.Author.Name,
 			Email:   c.Author.Email,
-			Date:    truncateToDay(c.Author.When),
+			Date:    truncateToDay(when),
+			Hour:    when.Hour(),
+			Weekday: when.Weekday(),
+			Month:   when.Month(),
 			Message: strings.TrimSpace(c.Message),
 		}
 		if needFiles {
