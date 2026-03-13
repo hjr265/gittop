@@ -95,9 +95,8 @@ func newModel(repo *git.Repository, path string) model {
 		newActivityPage(),
 		newContributorsPage(),
 		newBranchesPage(),
-		newFilesPage(),
-		newCommitsPage(),
 		newHealthPage(),
+		newCommitsPage(),
 	}
 	return m
 }
@@ -320,11 +319,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "4":
 			m.activeTab = TabBranches
 		case "5":
-			m.activeTab = TabFiles
+			m.activeTab = TabHealth
 		case "6":
 			m.activeTab = TabCommits
-		case "7":
-			m.activeTab = TabHealth
 		case "+", "=":
 			if m.rangeIdx < len(rangePresets)-1 {
 				m.rangeIdx++
@@ -553,7 +550,7 @@ func (m model) viewBottomBar() string {
 
 	// Normal bottom bar.
 	bindings := []struct{ key, desc string }{
-		{"1-7", "pages"},
+		{"1-6", "pages"},
 		{"tab", "next"},
 		{"+/-", "range"},
 		{"/", "filter"},

@@ -15,12 +15,13 @@ type healthView int
 
 const (
 	viewLargestFiles healthView = iota
+	viewMostChurn
 	viewMostAuthors
 	viewStalestFiles
 	healthViewCount
 )
 
-var healthViewNames = []string{"Largest Files", "Most Authors", "Stalest Files"}
+var healthViewNames = []string{"Largest Files", "Most Churn", "Most Authors", "Stalest Files"}
 
 // healthTreeMsg carries cached line counts from the HEAD tree.
 type healthTreeMsg struct {
@@ -165,6 +166,8 @@ func (p *healthPage) View(width, height int) string {
 	switch p.view {
 	case viewLargestFiles:
 		b.WriteString(p.renderLargestFiles(width, contentHeight))
+	case viewMostChurn:
+		b.WriteString(p.renderMostChurn(width, contentHeight))
 	case viewMostAuthors:
 		b.WriteString(p.renderMostAuthors(width, contentHeight))
 	case viewStalestFiles:
@@ -197,6 +200,37 @@ func (p *healthPage) renderLargestFiles(width, height int) string {
 	}
 
 	return p.renderFileList(sorted, width, func(f *FileHealthInfo) int { return f.Lines }, func(f *FileHealthInfo) string { return fmt.Sprintf("%d lines", f.Lines) }, maxLines)
+}
+
+func (p *healthPage) renderMostChurn(width, height int) string {
+	var candidates []FileHealthInfo
+	for _, f := range p.files {
+		if f.Churn > 0 {
+			candidates = append(candidates, f)
+		}
+	}
+	sort.Slice(candidates, func(i, j int) bool { return candidates[i].Churn > candidates[j].Churn })
+
+	maxRows := height - 2
+	if maxRows < 1 {
+		maxRows = 1
+	}
+	if len(candidates) > maxRows {
+		candidates = candidates[:maxRows]
+	}
+
+	if len(candidates) == 0 {
+		return "  No data."
+	}
+
+	maxVal := candidates[0].Churn
+	if maxVal == 0 {
+		maxVal = 1
+	}
+
+	return p.renderFileList(candidates, width, func(f *FileHealthInfo) int { return f.Churn }, func(f *FileHealthInfo) string {
+		return fmt.Sprintf("%d commits", f.Churn)
+	}, maxVal)
 }
 
 func (p *healthPage) renderMostAuthors(width, height int) string {

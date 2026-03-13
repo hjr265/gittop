@@ -231,6 +231,7 @@ type FileHealthInfo struct {
 	Lines       int
 	AuthorCount int
 	LastChanged time.Time
+	Churn       int // number of commits that touched this file
 }
 
 // CollectFileLineCounts walks the HEAD tree and returns line counts per file.
@@ -278,6 +279,7 @@ func CollectFileLineCounts(repo *git.Repository) (map[string]int, error) {
 func BuildHealthData(lineCounts map[string]int, commits []CommitInfo, filtered bool) []FileHealthInfo {
 	authors := map[string]map[string]bool{}
 	lastChanged := map[string]time.Time{}
+	churn := map[string]int{}
 	for i := range commits {
 		c := &commits[i]
 		for _, f := range c.Files {
@@ -285,6 +287,7 @@ func BuildHealthData(lineCounts map[string]int, commits []CommitInfo, filtered b
 				authors[f] = map[string]bool{}
 			}
 			authors[f][c.Author] = true
+			churn[f]++
 			if c.Date.After(lastChanged[f]) {
 				lastChanged[f] = c.Date
 			}
@@ -305,6 +308,7 @@ func BuildHealthData(lineCounts map[string]int, commits []CommitInfo, filtered b
 				Lines:       lineCounts[path],
 				AuthorCount: len(authors[path]),
 				LastChanged: lastChanged[path],
+				Churn:       churn[path],
 			})
 		}
 	} else {
@@ -314,6 +318,7 @@ func BuildHealthData(lineCounts map[string]int, commits []CommitInfo, filtered b
 				Lines:       lines,
 				AuthorCount: len(authors[path]),
 				LastChanged: lastChanged[path],
+				Churn:       churn[path],
 			})
 		}
 	}
