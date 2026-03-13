@@ -43,6 +43,10 @@ type model struct {
 	filterErr     error
 	filteredStats []DayStat
 	filtering     bool // true while re-scanning with files
+
+	// Health data.
+	healthLoaded  bool
+	healthLoading bool
 }
 
 type commitsMsg struct {
@@ -62,7 +66,8 @@ type statsMsg struct {
 }
 
 type commitsDataMsg struct {
-	commits []CommitInfo
+	commits  []CommitInfo
+	filtered bool // true when a filter is active
 }
 
 func newModel(repo *git.Repository, path string) model {
@@ -85,6 +90,7 @@ func newModel(repo *git.Repository, path string) model {
 		newBranchesPage(),
 		newFilesPage(),
 		newLogPage(),
+		newHealthPage(),
 	}
 	return m
 }
@@ -151,14 +157,15 @@ func (m *model) propagateStats() {
 	}
 
 	// Propagate filtered commits for pages that need them.
+	// Prefer commitsWithFiles when available (needed by Health tab).
 	source := m.commits
+	if m.commitsWithFiles != nil {
+		source = m.commitsWithFiles
+	}
 	if m.filterExpr != nil {
-		if FilterNeedsFiles(m.filterExpr) && m.commitsWithFiles != nil {
-			source = m.commitsWithFiles
-		}
 		source = FilterCommits(source, m.filterExpr)
 	}
-	cdMsg := commitsDataMsg{commits: source}
+	cdMsg := commitsDataMsg{commits: source, filtered: m.filterExpr != nil}
 	for i, p := range m.pages {
 		updated, _ := p.Update(cdMsg)
 		m.pages[i] = updated
@@ -191,6 +198,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err == nil {
 			m.commitsWithFiles = msg.commits
 			m.recomputeFilteredStats()
+		}
+		return m, nil
+
+	case healthTreeMsg:
+		m.healthLoading = false
+		m.healthLoaded = true
+		// Send tree data to the health page.
+		for i, p := range m.pages {
+			updated, _ := p.Update(msg)
+			m.pages[i] = updated
 		}
 		return m, nil
 
@@ -255,6 +272,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.activeTab = TabFiles
 		case "6":
 			m.activeTab = TabLog
+		case "7":
+			m.activeTab = TabHealth
 		case "tab":
 			m.activeTab = (m.activeTab + 1) % len(m.pages)
 		case "shift+tab":
@@ -268,6 +287,28 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 	}
+
+	// Trigger health data loading when Health tab is active.
+	if m.activeTab == TabHealth && !m.healthLoaded && !m.healthLoading {
+		m.healthLoading = true
+		repo := m.repo
+		cmds := []tea.Cmd{
+			func() tea.Msg {
+				lineCounts, err := CollectFileLineCounts(repo)
+				return healthTreeMsg{lineCounts: lineCounts, err: err}
+			},
+		}
+		// Also load commits with files if not already loaded.
+		if m.commitsWithFiles == nil && !m.filtering {
+			m.filtering = true
+			cmds = append(cmds, func() tea.Msg {
+				commits, err := CollectCommits(repo, true)
+				return commitsWithFilesMsg{commits: commits, err: err}
+			})
+		}
+		return m, tea.Batch(cmds...)
+	}
+
 	return m, nil
 }
 
@@ -424,7 +465,7 @@ func (m model) viewBottomBar() string {
 
 	// Normal bottom bar.
 	bindings := []struct{ key, desc string }{
-		{"1-6", "pages"},
+		{"1-7", "pages"},
 		{"tab", "next"},
 		{"/", "filter"},
 		{"q", "quit"},
@@ -444,6 +485,12 @@ func (m model) viewBottomBar() string {
 	if m.activeTab == TabActivity {
 		bindings = append(bindings,
 			struct{ key, desc string }{"v", "cycle view"},
+		)
+	}
+	if m.activeTab == TabHealth {
+		bindings = append(bindings,
+			struct{ key, desc string }{"v", "cycle view"},
+			struct{ key, desc string }{"f", "file filter"},
 		)
 	}
 

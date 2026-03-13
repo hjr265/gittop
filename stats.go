@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bytes"
+	"io"
 	"sort"
 	"strings"
 	"time"
@@ -220,4 +222,99 @@ func bucketKey(t time.Time, g Granularity) time.Time {
 
 func truncateToDay(t time.Time) time.Time {
 	return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, time.UTC)
+}
+
+// FileHealthInfo holds code health signals for a single file.
+type FileHealthInfo struct {
+	Path        string
+	Lines       int
+	AuthorCount int
+	LastChanged time.Time
+}
+
+// CollectFileLineCounts walks the HEAD tree and returns line counts per file.
+func CollectFileLineCounts(repo *git.Repository) (map[string]int, error) {
+	ref, err := repo.Head()
+	if err != nil {
+		return nil, err
+	}
+	commit, err := repo.CommitObject(ref.Hash())
+	if err != nil {
+		return nil, err
+	}
+	tree, err := commit.Tree()
+	if err != nil {
+		return nil, err
+	}
+
+	lineCounts := map[string]int{}
+	tree.Files().ForEach(func(f *object.File) error {
+		if f.Size > 1<<20 { // skip files >1MB
+			return nil
+		}
+		reader, err := f.Reader()
+		if err != nil {
+			return nil
+		}
+		defer reader.Close()
+		content, err := io.ReadAll(reader)
+		if err != nil {
+			return nil
+		}
+		lines := bytes.Count(content, []byte("\n"))
+		if len(content) > 0 && content[len(content)-1] != '\n' {
+			lines++ // count last line without trailing newline
+		}
+		lineCounts[f.Name] = lines
+		return nil
+	})
+
+	return lineCounts, nil
+}
+
+// BuildHealthData combines line counts with commit-derived author/staleness data.
+// If filtered is true, only files that appear in commits are included.
+func BuildHealthData(lineCounts map[string]int, commits []CommitInfo, filtered bool) []FileHealthInfo {
+	authors := map[string]map[string]bool{}
+	lastChanged := map[string]time.Time{}
+	for i := range commits {
+		c := &commits[i]
+		for _, f := range c.Files {
+			if authors[f] == nil {
+				authors[f] = map[string]bool{}
+			}
+			authors[f][c.Author] = true
+			if c.Date.After(lastChanged[f]) {
+				lastChanged[f] = c.Date
+			}
+		}
+	}
+
+	var result []FileHealthInfo
+	if filtered {
+		// Only include files that appear in the (filtered) commits.
+		seen := map[string]bool{}
+		for path := range authors {
+			if seen[path] {
+				continue
+			}
+			seen[path] = true
+			result = append(result, FileHealthInfo{
+				Path:        path,
+				Lines:       lineCounts[path],
+				AuthorCount: len(authors[path]),
+				LastChanged: lastChanged[path],
+			})
+		}
+	} else {
+		for path, lines := range lineCounts {
+			result = append(result, FileHealthInfo{
+				Path:        path,
+				Lines:       lines,
+				AuthorCount: len(authors[path]),
+				LastChanged: lastChanged[path],
+			})
+		}
+	}
+	return result
 }
