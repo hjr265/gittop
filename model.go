@@ -46,6 +46,10 @@ type model struct {
 	// Global date range.
 	rangeIdx int
 
+	// Branch data.
+	branchesLoaded  bool
+	branchesLoading bool
+
 	// Health data.
 	healthLoaded  bool
 	healthLoading bool
@@ -239,6 +243,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case branchesDataMsg:
+		m.branchesLoading = false
+		m.branchesLoaded = true
+		for i, p := range m.pages {
+			updated, _ := p.Update(msg)
+			m.pages[i] = updated
+		}
+		return m, nil
+
 	case healthTreeMsg:
 		m.healthLoading = false
 		m.healthLoaded = true
@@ -335,6 +348,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.pages[m.activeTab] = updated
 				return m, cmd
 			}
+		}
+	}
+
+	// Trigger branch data loading when Branches tab is active.
+	if m.activeTab == TabBranches && !m.branchesLoaded && !m.branchesLoading {
+		m.branchesLoading = true
+		repo := m.repo
+		return m, func() tea.Msg {
+			branches, err := CollectBranches(repo)
+			return branchesDataMsg{branches: branches, err: err}
 		}
 	}
 
@@ -545,6 +568,12 @@ func (m model) viewBottomBar() string {
 	if m.activeTab == TabSummary {
 		bindings = append(bindings,
 			struct{ key, desc string }{"d/w/m/y", "granularity"},
+		)
+	}
+	if m.activeTab == TabBranches {
+		bindings = append(bindings,
+			struct{ key, desc string }{"s/S", "sort/order"},
+			struct{ key, desc string }{"j/k", "scroll"},
 		)
 	}
 	if m.activeTab == TabActivity {

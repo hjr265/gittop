@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/go-git/go-git/v5"
+	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/object"
 )
 
@@ -317,4 +318,108 @@ func BuildHealthData(lineCounts map[string]int, commits []CommitInfo, filtered b
 		}
 	}
 	return result
+}
+
+// BranchInfo holds metadata for a single branch.
+type BranchInfo struct {
+	Name       string
+	IsCurrent  bool
+	LastCommit time.Time
+	Author     string
+	Ahead      int // commits ahead of default branch
+	Behind     int // commits behind default branch
+}
+
+// CollectBranches enumerates local branches and computes ahead/behind vs HEAD.
+func CollectBranches(repo *git.Repository) ([]BranchInfo, error) {
+	headRef, err := repo.Head()
+	if err != nil {
+		return nil, err
+	}
+	headCommit, err := repo.CommitObject(headRef.Hash())
+	if err != nil {
+		return nil, err
+	}
+	_ = headCommit
+
+	branches, err := repo.Branches()
+	if err != nil {
+		return nil, err
+	}
+
+	var result []BranchInfo
+	err = branches.ForEach(func(ref *plumbing.Reference) error {
+		name := ref.Name().Short()
+		commit, err := repo.CommitObject(ref.Hash())
+		if err != nil {
+			return nil
+		}
+
+		bi := BranchInfo{
+			Name:       name,
+			IsCurrent:  headRef.Name().IsBranch() && headRef.Name().Short() == name,
+			LastCommit: commit.Author.When,
+			Author:     commit.Author.Name,
+		}
+
+		if ref.Hash() != headRef.Hash() {
+			ahead, behind := computeAheadBehind(repo, ref.Hash(), headRef.Hash())
+			bi.Ahead = ahead
+			bi.Behind = behind
+		}
+
+		result = append(result, bi)
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return result, nil
+}
+
+// computeAheadBehind counts commits ahead/behind between branch and base.
+func computeAheadBehind(repo *git.Repository, branchHash, baseHash plumbing.Hash) (ahead, behind int) {
+	branchCommit, err := repo.CommitObject(branchHash)
+	if err != nil {
+		return 0, 0
+	}
+	baseCommit, err := repo.CommitObject(baseHash)
+	if err != nil {
+		return 0, 0
+	}
+
+	bases, err := branchCommit.MergeBase(baseCommit)
+	if err != nil || len(bases) == 0 {
+		return 0, 0
+	}
+	mergeBase := bases[0].Hash
+
+	// Count ahead: walk from branch to merge base.
+	iter, err := repo.Log(&git.LogOptions{From: branchHash})
+	if err != nil {
+		return 0, 0
+	}
+	iter.ForEach(func(c *object.Commit) error {
+		if c.Hash == mergeBase {
+			return io.EOF
+		}
+		ahead++
+		return nil
+	})
+
+	// Count behind: walk from base to merge base.
+	iter, err = repo.Log(&git.LogOptions{From: baseHash})
+	if err != nil {
+		return ahead, 0
+	}
+	iter.ForEach(func(c *object.Commit) error {
+		if c.Hash == mergeBase {
+			return io.EOF
+		}
+		behind++
+		return nil
+	})
+
+	return ahead, behind
 }
