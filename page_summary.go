@@ -29,11 +29,10 @@ const defaultRangeIdx = 2 // 1y
 type summaryPage struct {
 	stats       []DayStat
 	granularity Granularity
-	rangeIdx    int
 }
 
 func newSummaryPage() *summaryPage {
-	return &summaryPage{rangeIdx: defaultRangeIdx}
+	return &summaryPage{}
 }
 
 func (p *summaryPage) Init() tea.Cmd { return nil }
@@ -54,43 +53,17 @@ func (p *summaryPage) Update(msg tea.Msg) (Page, tea.Cmd) {
 			p.granularity = GranularityYearly
 		case "g":
 			p.granularity = p.granularity.Next()
-		case "+", "=":
-			if p.rangeIdx < len(rangePresets)-1 {
-				p.rangeIdx++
-			}
-		case "-", "_":
-			if p.rangeIdx > 0 {
-				p.rangeIdx--
-			}
 		}
 	}
 	return p, nil
 }
 
-// filteredStats returns stats trimmed to the selected range.
-func (p *summaryPage) filteredStats() []DayStat {
-	r := rangePresets[p.rangeIdx]
-	if r.days == 0 || len(p.stats) == 0 {
-		return p.stats
-	}
-	cutoff := truncateToDay(time.Now()).AddDate(0, 0, -r.days)
-	for i, s := range p.stats {
-		if !s.Date.Before(cutoff) {
-			return p.stats[i:]
-		}
-	}
-	return nil
-}
-
 func (p *summaryPage) View(width, height int) string {
 	if len(p.stats) == 0 {
-		return "\n  No data."
-	}
-
-	stats := p.filteredStats()
-	if len(stats) == 0 {
 		return "\n  No data in selected range."
 	}
+
+	stats := p.stats
 
 	var b strings.Builder
 
@@ -161,19 +134,7 @@ func (p *summaryPage) View(width, height int) string {
 
 	// Bar chart.
 	aggregated := AggregateStats(stats, p.granularity)
-	b.WriteString(renderBarChart(aggregated, p.granularity, p.rangeLabel(), width, height-7))
+	b.WriteString(renderBarChart(aggregated, p.granularity, width, height-7))
 
 	return b.String()
-}
-
-func (p *summaryPage) rangeLabel() string {
-	var parts []string
-	for i, r := range rangePresets {
-		if i == p.rangeIdx {
-			parts = append(parts, boldStyle.Render(r.label))
-		} else {
-			parts = append(parts, dimStyle.Render(r.label))
-		}
-	}
-	return strings.Join(parts, dimStyle.Render(" / "))
 }

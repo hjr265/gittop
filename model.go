@@ -27,8 +27,7 @@ type model struct {
 	activeTab int
 	pages     []Page
 
-	branch    string
-	fetchedAt time.Time
+	branch string
 
 	// Commit data.
 	commits         []CommitInfo // all commits (without files)
@@ -43,6 +42,9 @@ type model struct {
 	filterErr     error
 	filteredStats []DayStat
 	filtering     bool // true while re-scanning with files
+
+	// Global date range.
+	rangeIdx int
 
 	// Health data.
 	healthLoaded  bool
@@ -77,10 +79,11 @@ func newModel(repo *git.Repository, path string) model {
 	ti.Width = 80
 
 	m := model{
-		repo:      repo,
-		repoPath:  path,
-		loading:   true,
-		activeTab: TabSummary,
+		repo:        repo,
+		repoPath:    path,
+		loading:     true,
+		activeTab:   TabSummary,
+		rangeIdx:    defaultRangeIdx,
 		filterInput: ti,
 	}
 	m.pages = []Page{
@@ -149,10 +152,20 @@ func (m *model) recomputeFilteredStats() {
 	m.propagateStats()
 }
 
+func (m *model) rangeCutoff() time.Time {
+	r := rangePresets[m.rangeIdx]
+	if r.days == 0 {
+		return time.Time{} // no cutoff
+	}
+	return truncateToDay(time.Now()).AddDate(0, 0, -r.days)
+}
+
 func (m *model) propagateStats() {
-	statsMsg := statsMsg{stats: m.filteredStats}
+	cutoff := m.rangeCutoff()
+	stats := applyRangeCutoff(m.filteredStats, cutoff)
+	sm := statsMsg{stats: stats}
 	for i, p := range m.pages {
-		updated, _ := p.Update(statsMsg)
+		updated, _ := p.Update(sm)
 		m.pages[i] = updated
 	}
 
@@ -165,11 +178,37 @@ func (m *model) propagateStats() {
 	if m.filterExpr != nil {
 		source = FilterCommits(source, m.filterExpr)
 	}
+	source = applyRangeCutoffCommits(source, cutoff)
 	cdMsg := commitsDataMsg{commits: source, filtered: m.filterExpr != nil}
 	for i, p := range m.pages {
 		updated, _ := p.Update(cdMsg)
 		m.pages[i] = updated
 	}
+}
+
+func applyRangeCutoff(stats []DayStat, cutoff time.Time) []DayStat {
+	if cutoff.IsZero() || len(stats) == 0 {
+		return stats
+	}
+	for i, s := range stats {
+		if !s.Date.Before(cutoff) {
+			return stats[i:]
+		}
+	}
+	return nil
+}
+
+func applyRangeCutoffCommits(commits []CommitInfo, cutoff time.Time) []CommitInfo {
+	if cutoff.IsZero() || len(commits) == 0 {
+		return commits
+	}
+	var result []CommitInfo
+	for i := range commits {
+		if !commits[i].Date.Before(cutoff) {
+			result = append(result, commits[i])
+		}
+	}
+	return result
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -187,7 +226,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.branch = msg.branch
 		m.err = msg.err
 		m.loading = false
-		m.fetchedAt = time.Now()
 		m.stats = CommitsToDailyStats(m.commits)
 		m.filteredStats = m.stats
 		m.propagateStats()
@@ -274,6 +312,18 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.activeTab = TabLog
 		case "7":
 			m.activeTab = TabHealth
+		case "+", "=":
+			if m.rangeIdx < len(rangePresets)-1 {
+				m.rangeIdx++
+				m.propagateStats()
+			}
+			return m, nil
+		case "-", "_":
+			if m.rangeIdx > 0 {
+				m.rangeIdx--
+				m.propagateStats()
+			}
+			return m, nil
 		case "tab":
 			m.activeTab = (m.activeTab + 1) % len(m.pages)
 		case "shift+tab":
@@ -390,15 +440,20 @@ func (m model) viewTopBar() string {
 		filterIndicator += dimOnBar.Render(" (scanning files...)")
 	}
 
-	right := dimOnBar.Render(m.fetchedAt.Format("15:04:05") + " ")
+	// Range indicator.
+	rangeStyle := lipgloss.NewStyle().
+		Background(lipgloss.Color("236")).
+		Foreground(lipgloss.Color("82")).
+		Bold(true)
+	rangeIndicator := dimOnBar.Render("  ") + rangeStyle.Render(rangePresets[m.rangeIdx].label)
 
-	gap := m.width - lipgloss.Width(left) - lipgloss.Width(filterIndicator) - lipgloss.Width(right)
+	gap := m.width - lipgloss.Width(left) - lipgloss.Width(filterIndicator) - lipgloss.Width(rangeIndicator) - 1
 	if gap < 0 {
 		gap = 0
 	}
 	filler := lipgloss.NewStyle().Background(lipgloss.Color("236")).Render(strings.Repeat(" ", gap))
 
-	return left + filterIndicator + filler + right
+	return left + filterIndicator + filler + rangeIndicator + dimOnBar.Render(" ")
 }
 
 func (m model) viewTabBar() string {
@@ -467,6 +522,7 @@ func (m model) viewBottomBar() string {
 	bindings := []struct{ key, desc string }{
 		{"1-7", "pages"},
 		{"tab", "next"},
+		{"+/-", "range"},
 		{"/", "filter"},
 		{"q", "quit"},
 	}
@@ -479,7 +535,6 @@ func (m model) viewBottomBar() string {
 	if m.activeTab == TabSummary {
 		bindings = append(bindings,
 			struct{ key, desc string }{"d/w/m/y", "granularity"},
-			struct{ key, desc string }{"+/-", "range"},
 		)
 	}
 	if m.activeTab == TabActivity {

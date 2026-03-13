@@ -56,7 +56,7 @@ var (
 
 // renderBarChart renders a full bar chart of commit stats.
 // width and height are the available space for the chart.
-func renderBarChart(allStats []DayStat, granularity Granularity, rangeLabel string, width, height int) string {
+func renderBarChart(allStats []DayStat, granularity Granularity, width, height int) string {
 	if len(allStats) == 0 {
 		return "\n  No commit data."
 	}
@@ -125,11 +125,9 @@ func renderBarChart(allStats []DayStat, granularity Granularity, rangeLabel stri
 			granParts = append(granParts, dimStyle.Render(l))
 		}
 	}
-	b.WriteString(fmt.Sprintf("  %s  %s    %s  %s",
+	b.WriteString(fmt.Sprintf("  %s  %s",
 		dimStyle.Render("Commits"),
-		strings.Join(granParts, dimStyle.Render(" / ")),
-		dimStyle.Render("Range"),
-		rangeLabel))
+		strings.Join(granParts, dimStyle.Render(" / "))))
 	b.WriteString("\n\n")
 
 	for r := 0; r < chartHeight; r++ {
