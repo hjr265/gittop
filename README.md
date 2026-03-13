@@ -25,7 +25,32 @@ gittop              # visualize the current directory's Git repo
 gittop /path/to/repo
 ```
 
-Press `q`, `Esc`, or `Ctrl+C` to quit.
+## Tabs
+
+| # | Tab | What it shows |
+|---|-----|---------------|
+| 1 | **Summary** | KPI cards (total commits, active days, peak day, time span, latest release) + commit bar chart |
+| 2 | **Activity** | Commit heatmap (GitHub-style contribution grid) |
+| 3 | **Contributors** | Leaderboard, cadence, timeline, and file ownership views |
+| 4 | **Branches** | Sortable table with last commit, author, ahead/behind counts |
+| 5 | **Health** | Largest files, most churn, most authors, stalest files |
+| 6 | **Releases** | Tag timeline and release cadence chart |
+| 7 | **Commits** | Scrollable commit log |
+
+## Keys
+
+| Key | Action |
+|-----|--------|
+| `1`–`7` | Switch tab |
+| `Tab` / `Shift+Tab` | Next / previous tab |
+| `+` / `-` | Widen / narrow date range (3m, 6m, 1y, 2y, 5y, all) |
+| `/` | Open filter (`author:"name"`, `path:*.go`, `"keyword"`, `and`/`or`) |
+| `Esc` | Clear filter |
+| `v` | Cycle sub-views (Activity, Contributors, Health, Releases) |
+| `s` / `S` | Cycle sort column / toggle order (Branches) |
+| `j` / `k` | Scroll down / up |
+| `g` / `G` | Jump to top / bottom |
+| `q` | Quit |
 
 ## Recommended Setup
 
