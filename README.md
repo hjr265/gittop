@@ -34,6 +34,8 @@ For best results with the block character bar charts:
 - **Terminal:** Kitty, Alacritty, or WezTerm
 - **Font:** JetBrains Mono, Iosevka, or Fira Code
 
+Prototyped rapidly with an agentic coding tool.
+
 ## License
 
 BSD 3-Clause License. See [LICENSE](LICENSE) for details.
