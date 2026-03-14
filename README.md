@@ -4,7 +4,7 @@ A beautiful terminal UI for visualizing Git repository statistics, inspired by h
 
 ![Go](https://img.shields.io/badge/Go-1.22+-00ADD8?logo=go&logoColor=white)
 
-![gittop](screenshot.png)
+![Summary — KPI cards and commit activity chart](screenshots/summary.png)
 
 ## Install
 
@@ -38,6 +38,14 @@ gittop /path/to/repo
 | 5 | **Files** | Largest files, most churn, most authors, stalest files, language breakdown |
 | 6 | **Releases** | Tag timeline and release cadence chart |
 | 7 | **Commits** | Scrollable commit log with diff viewer and search |
+
+## Screenshots
+
+| | |
+|---|---|
+| ![Activity — By Hour](screenshots/activity.png) | ![Activity — Filtered by author](screenshots/activity-filtered.png) |
+| ![Contributors — Author detail](screenshots/contributors.png) | ![Files — Language breakdown](screenshots/files.png) |
+| ![Releases — Tag timeline](screenshots/releases.png) | ![Commits — Log](screenshots/commits.png) |
 
 ## Keys
 
