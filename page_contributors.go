@@ -294,11 +294,6 @@ func (p *contributorsPage) renderLeaderboard(width, height int) string {
 			name = name[:nameWidth-1] + "…"
 		}
 
-		barLen := a.Commits * barMaxWidth / maxCommits
-		if barLen > barMaxWidth {
-			barLen = barMaxWidth
-		}
-
 		ci := a.Commits * (len(barGradient) - 1) / maxCommits
 		if ci >= len(barGradient) {
 			ci = len(barGradient) - 1
@@ -306,10 +301,9 @@ func (p *contributorsPage) renderLeaderboard(width, height int) string {
 		barStyle := lipgloss.NewStyle().Foreground(barGradient[ci])
 
 		b.WriteString(fmt.Sprintf("  %-*s ", nameWidth, name))
-		if barLen > 0 {
-			b.WriteString(barStyle.Render(strings.Repeat("█", barLen)))
-		}
-		pad := barMaxWidth - barLen
+		bar, barW := smoothBar(a.Commits, maxCommits, barMaxWidth, barStyle)
+		b.WriteString(bar)
+		pad := barMaxWidth - barW
 		if pad > 0 {
 			b.WriteString(strings.Repeat(" ", pad))
 		}
@@ -397,11 +391,6 @@ func (p *contributorsPage) renderCadence(width, height int) string {
 			consistency = 100
 		}
 
-		barLen := int(consistency) * barMaxWidth / 100
-		if barLen > barMaxWidth {
-			barLen = barMaxWidth
-		}
-
 		var barStyle lipgloss.Style
 		switch {
 		case consistency >= 75:
@@ -415,10 +404,9 @@ func (p *contributorsPage) renderCadence(width, height int) string {
 		}
 
 		b.WriteString(fmt.Sprintf("  %-*s ", nameWidth, name))
-		if barLen > 0 {
-			b.WriteString(barStyle.Render(strings.Repeat("█", barLen)))
-		}
-		pad := barMaxWidth - barLen
+		bar, barW := smoothBar(int(consistency), 100, barMaxWidth, barStyle)
+		b.WriteString(bar)
+		pad := barMaxWidth - barW
 		if pad > 0 {
 			b.WriteString(strings.Repeat(" ", pad))
 		}
@@ -655,11 +643,6 @@ func (p *contributorsPage) renderOwnership(width, height int) string {
 			name = name[:nameWidth-1] + "…"
 		}
 
-		barLen := a.OwnedFiles * barMaxWidth / maxOwned
-		if barLen > barMaxWidth {
-			barLen = barMaxWidth
-		}
-
 		ci := a.OwnedFiles * (len(barGradient) - 1) / maxOwned
 		if ci >= len(barGradient) {
 			ci = len(barGradient) - 1
@@ -669,10 +652,9 @@ func (p *contributorsPage) renderOwnership(width, height int) string {
 		pct := float64(a.OwnedFiles) * 100 / float64(totalFiles)
 
 		b.WriteString(fmt.Sprintf("  %-*s ", nameWidth, name))
-		if barLen > 0 {
-			b.WriteString(barStyle.Render(strings.Repeat("█", barLen)))
-		}
-		pad := barMaxWidth - barLen
+		bar, barW := smoothBar(a.OwnedFiles, maxOwned, barMaxWidth, barStyle)
+		b.WriteString(bar)
+		pad := barMaxWidth - barW
 		if pad > 0 {
 			b.WriteString(strings.Repeat(" ", pad))
 		}

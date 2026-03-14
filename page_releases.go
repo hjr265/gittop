@@ -297,11 +297,6 @@ func (p *releasesPage) renderGapList(gaps []releaseGap, width, height int) strin
 			visualLabel = from + " → " + g.to
 		}
 
-		barLen := g.days * barMaxWidth / maxDays
-		if barLen > barMaxWidth {
-			barLen = barMaxWidth
-		}
-
 		ci := g.days * (len(barGradient) - 1) / maxDays
 		if ci >= len(barGradient) {
 			ci = len(barGradient) - 1
@@ -314,10 +309,9 @@ func (p *releasesPage) renderGapList(gaps []releaseGap, width, height int) strin
 		}
 
 		b.WriteString(fmt.Sprintf("  %s%s ", label, strings.Repeat(" ", pad)))
-		if barLen > 0 {
-			b.WriteString(barStyle.Render(strings.Repeat("█", barLen)))
-		}
-		barPad := barMaxWidth - barLen
+		bar, barW := smoothBar(g.days, maxDays, barMaxWidth, barStyle)
+		b.WriteString(bar)
+		barPad := barMaxWidth - barW
 		if barPad > 0 {
 			b.WriteString(strings.Repeat(" ", barPad))
 		}
@@ -399,8 +393,6 @@ func (p *releasesPage) renderGapDistribution(gaps []releaseGap, width, height in
 
 	var b strings.Builder
 	for _, bk := range buckets {
-		barLen := bk.count * barMaxWidth / maxCount
-
 		ci := bk.count * (len(barGradient) - 1) / maxCount
 		if ci >= len(barGradient) {
 			ci = len(barGradient) - 1
@@ -408,10 +400,9 @@ func (p *releasesPage) renderGapDistribution(gaps []releaseGap, width, height in
 		barStyle := lipgloss.NewStyle().Foreground(barGradient[ci])
 
 		b.WriteString(fmt.Sprintf("  %*s ", labelWidth, bk.label))
-		if barLen > 0 {
-			b.WriteString(barStyle.Render(strings.Repeat("█", barLen)))
-		}
-		pad := barMaxWidth - barLen
+		bar, barW := smoothBar(bk.count, maxCount, barMaxWidth, barStyle)
+		b.WriteString(bar)
+		pad := barMaxWidth - barW
 		if pad > 0 {
 			b.WriteString(strings.Repeat(" ", pad))
 		}

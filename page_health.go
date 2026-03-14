@@ -338,11 +338,6 @@ func (p *healthPage) renderFileList(files []FileHealthInfo, width int, valueFn f
 		f := &files[i]
 		val := valueFn(f)
 
-		barLen := val * barMaxWidth / maxVal
-		if barLen > barMaxWidth {
-			barLen = barMaxWidth
-		}
-
 		ci := val * (len(barGradient) - 1) / maxVal
 		if ci >= len(barGradient) {
 			ci = len(barGradient) - 1
@@ -356,11 +351,10 @@ func (p *healthPage) renderFileList(files []FileHealthInfo, width int, valueFn f
 
 		b.WriteString(fmt.Sprintf("  %-*s ", pathWidth, path))
 
-		if barLen > 0 {
-			b.WriteString(barStyle.Render(strings.Repeat("█", barLen)))
-		}
+		bar, barW := smoothBar(val, maxVal, barMaxWidth, barStyle)
+		b.WriteString(bar)
 
-		pad := barMaxWidth - barLen
+		pad := barMaxWidth - barW
 		if pad > 0 {
 			b.WriteString(strings.Repeat(" ", pad))
 		}

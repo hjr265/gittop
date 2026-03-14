@@ -140,9 +140,6 @@ func (p *activityPage) renderDistribution(width, height int, title string, bucke
 		label := labelFn(i)
 		count := counts[i]
 
-		// Bar length proportional to max.
-		barLen := count * barMaxWidth / maxCount
-
 		// Pick color based on intensity.
 		ci := count * (len(barGradient) - 1) / maxCount
 		if ci >= len(barGradient) {
@@ -155,12 +152,11 @@ func (p *activityPage) renderDistribution(width, height int, title string, bucke
 
 		b.WriteString(fmt.Sprintf("  %*s ", labelWidth, label))
 
-		if barLen > 0 {
-			b.WriteString(barStyle.Render(strings.Repeat("█", barLen)))
-		}
+		bar, barW := smoothBar(count, maxCount, barMaxWidth, barStyle)
+		b.WriteString(bar)
 
 		// Pad to align count.
-		pad := barMaxWidth - barLen
+		pad := barMaxWidth - barW
 		if pad > 0 {
 			b.WriteString(strings.Repeat(" ", pad))
 		}
