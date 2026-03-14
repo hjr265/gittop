@@ -1,4 +1,4 @@
-# gittop
+# GitTop
 
 A beautiful terminal UI for visualizing Git repository statistics, inspired by htop/btop.
 
