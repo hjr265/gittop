@@ -8,13 +8,13 @@ A beautiful terminal UI for visualizing Git repository statistics, inspired by h
 
 ## Install
 
-```
+``` sh
 go install github.com/hjr265/gittop@latest
 ```
 
 Or build from source:
 
-```
+``` sh
 git clone https://github.com/hjr265/gittop.git
 cd gittop
 go build -o gittop .
@@ -22,8 +22,8 @@ go build -o gittop .
 
 ## Usage
 
-```
-gittop              # visualize the current directory's Git repo
+``` sh
+gittop               # visualize the current directory's Git repo
 gittop /path/to/repo
 ```
 
