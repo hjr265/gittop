@@ -407,7 +407,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "4":
 			m.activeTab = TabBranches
 		case "5":
-			m.activeTab = TabHealth
+			m.activeTab = TabFiles
 		case "6":
 			m.activeTab = TabReleases
 		case "7":
@@ -459,7 +459,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	// Trigger health data loading when Health tab is active.
-	if m.activeTab == TabHealth && !m.healthLoaded && !m.healthLoading {
+	if m.activeTab == TabFiles && !m.healthLoaded && !m.healthLoading {
 		m.healthLoading = true
 		repo := m.repo
 		cmds := []tea.Cmd{
@@ -686,7 +686,7 @@ func (m model) viewBottomBar() string {
 			struct{ key, desc string }{"g/G", "top/bottom"},
 		)
 	}
-	if m.activeTab == TabHealth {
+	if m.activeTab == TabFiles {
 		bindings = append(bindings,
 			struct{ key, desc string }{"v", "cycle view"},
 			struct{ key, desc string }{"f", "file filter"},
