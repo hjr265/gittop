@@ -29,13 +29,13 @@ gittop /path/to/repo
 
 | # | Tab | What it shows |
 |---|-----|---------------|
-| 1 | **Summary** | KPI cards (total commits, active days, peak day, time span, latest release) + commit bar chart |
-| 2 | **Activity** | Commit heatmap (GitHub-style contribution grid) |
-| 3 | **Contributors** | Leaderboard, cadence, timeline, and file ownership views |
+| 1 | **Summary** | KPI cards (total commits, active days, peak day, time span, latest release) + braille area chart |
+| 2 | **Activity** | Heatmap, by-hour, by-weekday, by-month distributions |
+| 3 | **Contributors** | Split panel: ranked list (left) + per-author detail with cadence, schedule, top files (right) |
 | 4 | **Branches** | Sortable table with last commit, author, ahead/behind counts |
-| 5 | **Health** | Largest files, most churn, most authors, stalest files |
+| 5 | **Files** | Largest files, most churn, most authors, stalest files, language breakdown |
 | 6 | **Releases** | Tag timeline and release cadence chart |
-| 7 | **Commits** | Scrollable commit log |
+| 7 | **Commits** | Scrollable commit log with diff viewer and search |
 
 ## Keys
 
@@ -44,12 +44,16 @@ gittop /path/to/repo
 | `1`–`7` | Switch tab |
 | `Tab` / `Shift+Tab` | Next / previous tab |
 | `+` / `-` | Widen / narrow date range (3m, 6m, 1y, 2y, 5y, all) |
-| `/` | Open filter (`author:"name"`, `path:*.go`, `"keyword"`, `and`/`or`) |
-| `Esc` | Clear filter |
-| `v` | Cycle sub-views (Activity, Contributors, Health, Releases) |
-| `s` / `S` | Cycle sort column / toggle order (Branches) |
+| `/` | Open global filter (`author:"name"`, `path:*.go`, `branch:main`, `"keyword"`, `and`/`or`/`not`) |
+| `Esc` | Clear filter or page-local search |
+| `r` | Refresh (re-scan repository) |
+| `d` / `w` / `m` / `y` | Chart granularity: daily, weekly, monthly, yearly (Summary) |
+| `v` | Cycle sub-views (Activity, Files, Releases) |
+| `f` | File path filter (Files tab) |
+| `s` / `S` | Sort column / toggle order (Branches); search (Commits) |
 | `j` / `k` | Scroll down / up |
 | `g` / `G` | Jump to top / bottom |
+| `Enter` | Open commit diff (Commits) |
 | `q` | Quit |
 
 ## Recommended Setup
