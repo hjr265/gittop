@@ -18,10 +18,11 @@ const (
 	viewMostChurn
 	viewMostAuthors
 	viewStalestFiles
+	viewLanguages
 	healthViewCount
 )
 
-var healthViewNames = []string{"Largest Files", "Most Churn", "Most Authors", "Stalest Files"}
+var healthViewNames = []string{"Largest Files", "Most Churn", "Most Authors", "Stalest Files", "Languages"}
 
 // healthTreeMsg carries cached line counts from the HEAD tree.
 type healthTreeMsg struct {
@@ -172,6 +173,8 @@ func (p *healthPage) View(width, height int) string {
 		b.WriteString(p.renderMostAuthors(width, contentHeight))
 	case viewStalestFiles:
 		b.WriteString(p.renderStalestFiles(width, contentHeight))
+	case viewLanguages:
+		b.WriteString(p.renderLanguages(width, contentHeight))
 	}
 
 	return b.String()
@@ -362,6 +365,120 @@ func (p *healthPage) renderFileList(files []FileHealthInfo, width int, valueFn f
 		b.WriteString(dimStyle.Render(fmt.Sprintf(" %*s", labelWidth, labelFn(f))))
 		b.WriteString("\n")
 	}
+
+	return b.String()
+}
+
+type langStat struct {
+	ext   string
+	lines int
+	files int
+}
+
+func (p *healthPage) renderLanguages(width, height int) string {
+	if p.lineCounts == nil {
+		return "  No data."
+	}
+
+	// Group line counts by extension.
+	extLines := map[string]int{}
+	extFiles := map[string]int{}
+	for path, lines := range p.lineCounts {
+		// Apply path filter if active.
+		if p.pathPattern != "" {
+			low := strings.ToLower(path)
+			pat := strings.ToLower(p.pathPattern)
+			m1, _ := filepath.Match(pat, low)
+			m2, _ := filepath.Match(pat, filepath.Base(low))
+			if !m1 && !m2 && !strings.Contains(low, pat) {
+				continue
+			}
+		}
+		ext := strings.ToLower(filepath.Ext(path))
+		if ext == "" {
+			ext = "(no ext)"
+		}
+		extLines[ext] += lines
+		extFiles[ext]++
+	}
+
+	if len(extLines) == 0 {
+		return "  No data."
+	}
+
+	// Build sorted list.
+	langs := make([]langStat, 0, len(extLines))
+	totalLines := 0
+	for ext, lines := range extLines {
+		langs = append(langs, langStat{ext: ext, lines: lines, files: extFiles[ext]})
+		totalLines += lines
+	}
+	sort.Slice(langs, func(i, j int) bool { return langs[i].lines > langs[j].lines })
+
+	maxRows := height - 3
+	if maxRows < 1 {
+		maxRows = 1
+	}
+	if len(langs) > maxRows {
+		langs = langs[:maxRows]
+	}
+
+	maxLines := langs[0].lines
+	if maxLines == 0 {
+		maxLines = 1
+	}
+
+	// Label widths.
+	extWidth := 0
+	for _, l := range langs {
+		if len(l.ext) > extWidth {
+			extWidth = len(l.ext)
+		}
+	}
+	if extWidth < 6 {
+		extWidth = 6
+	}
+
+	barGradient := []lipgloss.Color{
+		lipgloss.Color("63"),
+		lipgloss.Color("33"),
+		lipgloss.Color("39"),
+		lipgloss.Color("49"),
+		lipgloss.Color("82"),
+	}
+
+	// "  ext  ███ 12345 lines  45 files  12.3%"
+	barMaxWidth := width - extWidth - 40
+	if barMaxWidth < 10 {
+		barMaxWidth = 10
+	}
+
+	var b strings.Builder
+	for _, l := range langs {
+		ci := l.lines * (len(barGradient) - 1) / maxLines
+		if ci >= len(barGradient) {
+			ci = len(barGradient) - 1
+		}
+		barStyle := lipgloss.NewStyle().Foreground(barGradient[ci])
+
+		pct := float64(l.lines) * 100 / float64(totalLines)
+
+		b.WriteString(fmt.Sprintf("  %-*s ", extWidth, l.ext))
+
+		bar, barW := smoothBar(l.lines, maxLines, barMaxWidth, barStyle)
+		b.WriteString(bar)
+
+		pad := barMaxWidth - barW
+		if pad > 0 {
+			b.WriteString(strings.Repeat(" ", pad))
+		}
+
+		b.WriteString(dimStyle.Render(fmt.Sprintf(" %6d lines  %4d files  %5.1f%%", l.lines, l.files, pct)))
+		b.WriteString("\n")
+	}
+
+	b.WriteString("\n")
+	b.WriteString(dimStyle.Render(fmt.Sprintf("  %d extensions, %d total lines", len(extLines), totalLines)))
 
 	return b.String()
 }
