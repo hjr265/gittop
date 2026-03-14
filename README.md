@@ -4,6 +4,8 @@ A beautiful terminal UI for visualizing Git repository statistics, inspired by h
 
 ![Go](https://img.shields.io/badge/Go-1.22+-00ADD8?logo=go&logoColor=white)
 
+![gittop](screenshot.png)
+
 ## Install
 
 ```
