@@ -439,6 +439,35 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.propagateStats()
 			}
 			return m, nil
+		case "r":
+			// Manual refresh: re-scan the repository.
+			m.loading = true
+			m.commits = nil
+			m.commitsWithFiles = nil
+			m.stats = nil
+			m.filteredStats = nil
+			m.tags = nil
+			m.tagsLoaded = false
+			m.tagsLoading = false
+			m.branchesLoaded = false
+			m.branchesLoading = false
+			m.healthLoaded = false
+			m.healthLoading = false
+			m.filtering = false
+			m.commitsSince = 0
+			repo := m.repo
+			return m, func() tea.Msg {
+				commits, err := CollectCommits(repo, false)
+				branch := ""
+				if ref, e := repo.Head(); e == nil {
+					if ref.Name().IsBranch() {
+						branch = ref.Name().Short()
+					} else {
+						branch = ref.Hash().String()[:8]
+					}
+				}
+				return commitsMsg{commits: commits, branch: branch, err: err}
+			}
 		case "tab":
 			m.activeTab = (m.activeTab + 1) % len(m.pages)
 		case "shift+tab":
@@ -659,6 +688,7 @@ func (m model) viewBottomBar() string {
 		{"tab", "next"},
 		{"+/-", "range"},
 		{"/", "filter"},
+		{"r", "refresh"},
 		{"q", "quit"},
 	}
 
