@@ -25,7 +25,13 @@ type commitsPage struct {
 	repo    *git.Repository
 	commits []CommitInfo
 	offset  int // scroll offset (top of visible window)
-	cursor  int // selected row index (absolute, within commits)
+	cursor  int // selected row index (absolute, within filtered/full list)
+
+	// Search state.
+	searching   bool   // true when typing search query
+	searchInput string // current input while editing
+	searchQuery string // active search query
+	filtered    []int  // indices into commits matching searchQuery
 
 	// Diff view state.
 	showDiff    bool
@@ -46,7 +52,8 @@ func (p *commitsPage) Update(msg tea.Msg) (Page, tea.Cmd) {
 	switch msg := msg.(type) {
 	case commitsDataMsg:
 		p.commits = msg.commits
-		if p.cursor >= len(p.commits) {
+		p.refilter()
+		if p.cursor >= p.visibleLen() {
 			p.cursor = 0
 			p.offset = 0
 		}
@@ -65,15 +72,88 @@ func (p *commitsPage) Update(msg tea.Msg) (Page, tea.Cmd) {
 		if p.showDiff {
 			return p.updateDiffView(msg)
 		}
+		if p.searching {
+			return p.updateSearch(msg)
+		}
 		return p.updateListView(msg)
 	}
 	return p, nil
 }
 
+// visibleLen returns the number of commits currently visible (filtered or all).
+func (p *commitsPage) visibleLen() int {
+	if p.searchQuery != "" {
+		return len(p.filtered)
+	}
+	return len(p.commits)
+}
+
+// visibleCommit returns the commit at the given visible index.
+func (p *commitsPage) visibleCommit(i int) CommitInfo {
+	if p.searchQuery != "" {
+		return p.commits[p.filtered[i]]
+	}
+	return p.commits[i]
+}
+
+// refilter recomputes the filtered index list based on the current search query.
+func (p *commitsPage) refilter() {
+	if p.searchQuery == "" {
+		p.filtered = nil
+		return
+	}
+	q := strings.ToLower(p.searchQuery)
+	p.filtered = nil
+	for i, c := range p.commits {
+		if fuzzyMatch(q, c) {
+			p.filtered = append(p.filtered, i)
+		}
+	}
+}
+
+func fuzzyMatch(query string, c CommitInfo) bool {
+	// Split query into terms for fuzzy matching.
+	terms := strings.Fields(query)
+	for _, term := range terms {
+		found := strings.Contains(strings.ToLower(c.Hash), term) ||
+			strings.Contains(strings.ToLower(c.Author), term) ||
+			strings.Contains(strings.ToLower(c.Email), term) ||
+			strings.Contains(strings.ToLower(c.Message), term)
+		if !found {
+			return false
+		}
+	}
+	return true
+}
+
+func (p *commitsPage) updateSearch(msg tea.KeyMsg) (Page, tea.Cmd) {
+	switch msg.String() {
+	case "enter":
+		p.searchQuery = p.searchInput
+		p.searching = false
+		p.refilter()
+		p.cursor = 0
+		p.offset = 0
+	case "esc":
+		p.searching = false
+		p.searchInput = p.searchQuery
+	case "backspace":
+		if len(p.searchInput) > 0 {
+			p.searchInput = p.searchInput[:len(p.searchInput)-1]
+		}
+	default:
+		if len(msg.String()) == 1 {
+			p.searchInput += msg.String()
+		}
+	}
+	return p, nil
+}
+
 func (p *commitsPage) updateListView(msg tea.KeyMsg) (Page, tea.Cmd) {
+	n := p.visibleLen()
 	switch msg.String() {
 	case "j", "down":
-		if p.cursor < len(p.commits)-1 {
+		if p.cursor < n-1 {
 			p.cursor++
 		}
 	case "k", "up":
@@ -84,12 +164,23 @@ func (p *commitsPage) updateListView(msg tea.KeyMsg) (Page, tea.Cmd) {
 		p.cursor = 0
 		p.offset = 0
 	case "G":
-		if len(p.commits) > 0 {
-			p.cursor = len(p.commits) - 1
+		if n > 0 {
+			p.cursor = n - 1
+		}
+	case "s":
+		p.searching = true
+		p.searchInput = p.searchQuery
+	case "esc":
+		if p.searchQuery != "" {
+			p.searchQuery = ""
+			p.searchInput = ""
+			p.filtered = nil
+			p.cursor = 0
+			p.offset = 0
 		}
 	case "enter":
-		if p.cursor >= 0 && p.cursor < len(p.commits) && p.repo != nil {
-			c := p.commits[p.cursor]
+		if p.cursor >= 0 && p.cursor < n && p.repo != nil {
+			c := p.visibleCommit(p.cursor)
 			p.diffLoading = true
 			repo := p.repo
 			return p, func() tea.Msg {
@@ -185,6 +276,8 @@ func (p *commitsPage) View(width, height int) string {
 }
 
 func (p *commitsPage) viewList(width, height int) string {
+	n := p.visibleLen()
+
 	if len(p.commits) == 0 {
 		return "\n  No commits in selected range."
 	}
@@ -198,8 +291,21 @@ func (p *commitsPage) viewList(width, height int) string {
 	msgStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("255"))
 	selectedStyle := lipgloss.NewStyle().Background(lipgloss.Color("237"))
 
-	b.WriteString(fmt.Sprintf("  %s\n\n",
-		dimStyle.Render(fmt.Sprintf("%d commits", len(p.commits)))))
+	// Header with count and search indicator.
+	header := fmt.Sprintf("%d commits", len(p.commits))
+	if p.searching {
+		filterStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Bold(true)
+		header += "    search: " + filterStyle.Render(p.searchInput+"_")
+	} else if p.searchQuery != "" {
+		filterStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Bold(true)
+		header = fmt.Sprintf("%d/%d commits    search: ", n, len(p.commits)) + filterStyle.Render(p.searchQuery)
+	}
+	b.WriteString(fmt.Sprintf("  %s\n\n", dimStyle.Render(header)))
+
+	if n == 0 && p.searchQuery != "" {
+		b.WriteString("  No matching commits.")
+		return b.String()
+	}
 
 	visibleRows := height - 3
 	if visibleRows < 1 {
@@ -214,7 +320,7 @@ func (p *commitsPage) viewList(width, height int) string {
 		p.offset = p.cursor - visibleRows + 1
 	}
 
-	maxOffset := len(p.commits) - visibleRows
+	maxOffset := n - visibleRows
 	if maxOffset < 0 {
 		maxOffset = 0
 	}
@@ -223,8 +329,8 @@ func (p *commitsPage) viewList(width, height int) string {
 	}
 
 	end := p.offset + visibleRows
-	if end > len(p.commits) {
-		end = len(p.commits)
+	if end > n {
+		end = n
 	}
 
 	authorWidth := 16
@@ -237,7 +343,7 @@ func (p *commitsPage) viewList(width, height int) string {
 	}
 
 	for i := p.offset; i < end; i++ {
-		c := p.commits[i]
+		c := p.visibleCommit(i)
 
 		hash := c.Hash
 		if len(hash) > hashWidth {

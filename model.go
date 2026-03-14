@@ -388,9 +388,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
-		// If the commits page is showing a diff, delegate q/esc to it.
+		// Delegate to commits page when it's in diff view or search mode.
 		if m.activeTab == TabCommits {
-			if cp, ok := m.pages[TabCommits].(*commitsPage); ok && cp.showDiff {
+			if cp, ok := m.pages[TabCommits].(*commitsPage); ok && (cp.showDiff || cp.searching) {
 				updated, cmd := m.pages[TabCommits].Update(msg)
 				m.pages[TabCommits] = updated
 				return m, cmd
@@ -406,6 +406,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.filterInput.Focus()
 			return m, m.filterInput.Cursor.BlinkCmd()
 		case "esc":
+			// On commits tab with active search, clear the search first.
+			if m.activeTab == TabCommits {
+				if cp, ok := m.pages[TabCommits].(*commitsPage); ok && cp.searchQuery != "" {
+					updated, cmd := m.pages[TabCommits].Update(msg)
+					m.pages[TabCommits] = updated
+					return m, cmd
+				}
+			}
 			// Clear filter.
 			if m.filterQuery != "" {
 				m.filterQuery = ""
@@ -734,12 +742,21 @@ func (m model) viewBottomBar() string {
 				struct{ key, desc string }{"j/k", "scroll"},
 				struct{ key, desc string }{"g/G", "top/bottom"},
 			)
+		} else if cp, ok := m.pages[TabCommits].(*commitsPage); ok && cp.searching {
+			bindings = append(bindings,
+				struct{ key, desc string }{"enter", "search"},
+				struct{ key, desc string }{"esc", "cancel"},
+			)
 		} else {
 			bindings = append(bindings,
 				struct{ key, desc string }{"enter", "open diff"},
+				struct{ key, desc string }{"s", "search"},
 				struct{ key, desc string }{"j/k", "scroll"},
 				struct{ key, desc string }{"g/G", "top/bottom"},
 			)
+			if cp, ok := m.pages[TabCommits].(*commitsPage); ok && cp.searchQuery != "" {
+				bindings = append(bindings, struct{ key, desc string }{"esc", "clear search"})
+			}
 		}
 	}
 	if m.activeTab == TabFiles {
