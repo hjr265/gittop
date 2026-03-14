@@ -109,7 +109,7 @@ func newModel(repo *git.Repository, path string) model {
 		newBranchesPage(),
 		newHealthPage(),
 		newReleasesPage(),
-		newCommitsPage(),
+		newCommitsPage(repo),
 	}
 	return m
 }
@@ -304,6 +304,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case commitDiffMsg:
+		// Route diff result to the commits page.
+		updated, _ := m.pages[TabCommits].Update(msg)
+		m.pages[TabCommits] = updated
+		return m, nil
+
 	case commitsWithFilesMsg:
 		m.filtering = false
 		if msg.err == nil {
@@ -375,6 +381,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			default:
 				var cmd tea.Cmd
 				m.filterInput, cmd = m.filterInput.Update(msg)
+				return m, cmd
+			}
+		}
+
+		// If the commits page is showing a diff, delegate q/esc to it.
+		if m.activeTab == TabCommits {
+			if cp, ok := m.pages[TabCommits].(*commitsPage); ok && cp.showDiff {
+				updated, cmd := m.pages[TabCommits].Update(msg)
+				m.pages[TabCommits] = updated
 				return m, cmd
 			}
 		}
@@ -681,10 +696,19 @@ func (m model) viewBottomBar() string {
 		)
 	}
 	if m.activeTab == TabCommits {
-		bindings = append(bindings,
-			struct{ key, desc string }{"j/k", "scroll"},
-			struct{ key, desc string }{"g/G", "top/bottom"},
-		)
+		if cp, ok := m.pages[TabCommits].(*commitsPage); ok && cp.showDiff {
+			bindings = append(bindings,
+				struct{ key, desc string }{"esc", "back"},
+				struct{ key, desc string }{"j/k", "scroll"},
+				struct{ key, desc string }{"g/G", "top/bottom"},
+			)
+		} else {
+			bindings = append(bindings,
+				struct{ key, desc string }{"enter", "open diff"},
+				struct{ key, desc string }{"j/k", "scroll"},
+				struct{ key, desc string }{"g/G", "top/bottom"},
+			)
+		}
 	}
 	if m.activeTab == TabFiles {
 		bindings = append(bindings,
