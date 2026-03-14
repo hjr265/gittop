@@ -7,6 +7,9 @@ import (
 
 	"github.com/alecthomas/participle/v2"
 	"github.com/alecthomas/participle/v2/lexer"
+	"github.com/go-git/go-git/v5"
+	"github.com/go-git/go-git/v5/plumbing"
+	"github.com/go-git/go-git/v5/plumbing/object"
 )
 
 // Grammar AST for participle.
@@ -35,14 +38,15 @@ type UnaryExpr struct {
 type FieldExpr struct {
 	Author *string `parser:"'author' ':' @(String | Ident | Pattern)"`
 	Path   *string `parser:"| 'path' ':' @(String | Ident | Pattern)"`
+	Branch *string `parser:"| 'branch' ':' @(String | Ident | Pattern)"`
 }
 
 var filterLexer = lexer.MustSimple([]lexer.SimpleRule{
 	{Name: "Whitespace", Pattern: `\s+`},
 	{Name: "String", Pattern: `"[^"]*"`},
 	{Name: "Keyword", Pattern: `(?i)(?:and|or|not)\b`},
-	{Name: "Ident", Pattern: `[a-zA-Z_][a-zA-Z0-9_\-]*`},
 	{Name: "Pattern", Pattern: `[a-zA-Z0-9_\-]*[.*/?][a-zA-Z0-9_\-.*/?]*`},
+	{Name: "Ident", Pattern: `[a-zA-Z_][a-zA-Z0-9_\-]*`},
 	{Name: "Punct", Pattern: `[():]`},
 })
 
@@ -115,6 +119,9 @@ func compileField(node *FieldExpr) FilterExpr {
 	}
 	if node.Path != nil {
 		return &pathFilterExpr{pattern: *node.Path}
+	}
+	if node.Branch != nil {
+		return &branchFilterExpr{pattern: *node.Branch}
 	}
 	return nil
 }
@@ -190,6 +197,16 @@ func (e *messageFilterExpr) Match(c *CommitInfo) bool {
 }
 func (e *messageFilterExpr) String() string { return fmt.Sprintf("%q", e.text) }
 
+type branchFilterExpr struct {
+	pattern string
+	hashes  map[string]bool // populated by PopulateBranchHashes before filtering
+}
+
+func (e *branchFilterExpr) Match(c *CommitInfo) bool {
+	return e.hashes[c.Hash]
+}
+func (e *branchFilterExpr) String() string { return fmt.Sprintf("branch:%q", e.pattern) }
+
 // FilterNeedsFiles returns true if the filter expression requires file lists.
 func FilterNeedsFiles(expr FilterExpr) bool {
 	if expr == nil {
@@ -206,5 +223,94 @@ func FilterNeedsFiles(expr FilterExpr) bool {
 		return FilterNeedsFiles(e.inner)
 	default:
 		return false
+	}
+}
+
+// FilterNeedsBranches returns true if the filter expression uses branch: filters.
+func FilterNeedsBranches(expr FilterExpr) bool {
+	if expr == nil {
+		return false
+	}
+	switch e := expr.(type) {
+	case *branchFilterExpr:
+		return true
+	case *andFilterExpr:
+		return FilterNeedsBranches(e.left) || FilterNeedsBranches(e.right)
+	case *orFilterExpr:
+		return FilterNeedsBranches(e.left) || FilterNeedsBranches(e.right)
+	case *notFilterExpr:
+		return FilterNeedsBranches(e.inner)
+	default:
+		return false
+	}
+}
+
+// PopulateBranchHashes walks all branches in the repo and populates the hash
+// sets in any branchFilterExpr nodes within the expression tree.
+func PopulateBranchHashes(expr FilterExpr, repo *git.Repository) {
+	if expr == nil || repo == nil {
+		return
+	}
+
+	var nodes []*branchFilterExpr
+	collectBranchNodes(expr, &nodes)
+	if len(nodes) == 0 {
+		return
+	}
+
+	for _, n := range nodes {
+		n.hashes = make(map[string]bool)
+	}
+
+	branches, err := repo.Branches()
+	if err != nil {
+		return
+	}
+	branches.ForEach(func(ref *plumbing.Reference) error {
+		name := ref.Name().Short()
+
+		// Check which filter nodes match this branch name.
+		var matching []*branchFilterExpr
+		for _, n := range nodes {
+			p := strings.ToLower(n.pattern)
+			nameLower := strings.ToLower(name)
+			matched, _ := filepath.Match(p, nameLower)
+			if matched || strings.Contains(nameLower, p) {
+				matching = append(matching, n)
+			}
+		}
+		if len(matching) == 0 {
+			return nil
+		}
+
+		// Walk commits reachable from this branch.
+		iter, err := repo.Log(&git.LogOptions{From: ref.Hash()})
+		if err != nil {
+			return nil
+		}
+		iter.ForEach(func(c *object.Commit) error {
+			h := c.Hash.String()
+			for _, n := range matching {
+				n.hashes[h] = true
+			}
+			return nil
+		})
+
+		return nil
+	})
+}
+
+func collectBranchNodes(expr FilterExpr, nodes *[]*branchFilterExpr) {
+	switch e := expr.(type) {
+	case *branchFilterExpr:
+		*nodes = append(*nodes, e)
+	case *andFilterExpr:
+		collectBranchNodes(e.left, nodes)
+		collectBranchNodes(e.right, nodes)
+	case *orFilterExpr:
+		collectBranchNodes(e.left, nodes)
+		collectBranchNodes(e.right, nodes)
+	case *notFilterExpr:
+		collectBranchNodes(e.inner, nodes)
 	}
 }

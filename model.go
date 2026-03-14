@@ -90,7 +90,7 @@ type commitsDataMsg struct {
 
 func newModel(repo *git.Repository, path string) model {
 	ti := textinput.New()
-	ti.Placeholder = `author:"name" and ("fix" or "bug") and path:*.go`
+	ti.Placeholder = `author:"name" and ("fix" or "bug") and path:*.go and branch:main`
 	ti.CharLimit = 256
 	ti.Width = 80
 
@@ -143,6 +143,9 @@ func (m *model) applyFilter() {
 		return
 	}
 	m.filterExpr = expr
+	if FilterNeedsBranches(m.filterExpr) {
+		PopulateBranchHashes(m.filterExpr, m.repo)
+	}
 	m.recomputeFilteredStats()
 }
 
