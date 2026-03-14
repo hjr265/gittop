@@ -6,6 +6,8 @@ A beautiful terminal UI for visualizing Git repository statistics, inspired by h
 
 ![Summary — KPI cards and commit activity chart](screenshots/summary.png)
 
+Prototyped rapidly with an agentic coding tool. Read the [blog post](https://hjr265.me/blog/building-gittop-with-agentic-coding/).
+
 ## Install
 
 ``` sh
@@ -72,8 +74,6 @@ For best results with the block character bar charts:
 
 - **Terminal:** Kitty, Alacritty, or WezTerm
 - **Font:** JetBrains Mono, Iosevka, or Fira Code
-
-Prototyped rapidly with an agentic coding tool.
 
 ## License
 
