@@ -29,11 +29,13 @@ gittop               # visualize the current directory's Git repo
 gittop /path/to/repo
 ```
 
+When no path is given, GitTop also respects the `GIT_DIR` and `GIT_WORK_TREE` environment variables.
+
 ## Tabs
 
 | # | Tab | What it shows |
 |---|-----|---------------|
-| 1 | **Summary** | KPI cards (total commits, active days, peak day, time span, latest release) + braille area chart |
+| 1 | **Summary** | KPI cards (total commits, active days, peak day, time span, latest release) + area chart (braille or block) |
 | 2 | **Activity** | Heatmap, by-hour, by-weekday, by-month distributions |
 | 3 | **Contributors** | Split panel: ranked list (left) + per-author detail with cadence, schedule, top files (right) |
 | 4 | **Branches** | Sortable table with last commit, author, ahead/behind counts |
@@ -66,6 +68,7 @@ gittop /path/to/repo
 | `j` / `k` | Scroll down / up |
 | `g` / `G` | Jump to top / bottom |
 | `Enter` | Open commit diff (Commits) |
+| `o` | Open options menu (color theme, truecolor, graph symbol) |
 | `q` | Quit |
 
 ## Recommended Setup
