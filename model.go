@@ -59,6 +59,10 @@ type model struct {
 	// Health data.
 	healthLoaded  bool
 	healthLoading bool
+
+	// Options menu.
+	optionsOpen   bool
+	optionsCursor int
 }
 
 type commitsMsg struct {
@@ -359,6 +363,23 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyMsg:
+		// Options menu mode.
+		if m.optionsOpen {
+			switch msg.String() {
+			case "esc", "o", "q":
+				m.optionsOpen = false
+			case "up", "k":
+				if m.optionsCursor > 0 {
+					m.optionsCursor--
+				}
+			case "down", "j":
+				if m.optionsCursor < 2 {
+					m.optionsCursor++
+				}
+			}
+			return m, nil
+		}
+
 		// Filter input mode.
 		if m.filterActive {
 			switch msg.String() {
@@ -479,6 +500,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				return commitsMsg{commits: commits, branch: branch, err: err}
 			}
+		case "o":
+			m.optionsOpen = true
+			m.optionsCursor = 0
 		case "tab":
 			m.activeTab = (m.activeTab + 1) % len(m.pages)
 		case "shift+tab":
@@ -563,7 +587,13 @@ func (m model) View() string {
 	if pageHeight < 1 {
 		pageHeight = 1
 	}
-	content := m.pages[m.activeTab].View(m.width, pageHeight)
+
+	var content string
+	if m.optionsOpen {
+		content = m.viewOptions(m.width, pageHeight)
+	} else {
+		content = m.pages[m.activeTab].View(m.width, pageHeight)
+	}
 
 	// Pad or truncate content to fill the page area.
 	lines := strings.Split(content, "\n")
@@ -699,6 +729,7 @@ func (m model) viewBottomBar() string {
 		{"tab", "next"},
 		{"+/-", "range"},
 		{"/", "filter"},
+		{"o", "options"},
 		{"r", "refresh"},
 		{"q", "quit"},
 	}
@@ -789,4 +820,79 @@ func (m model) viewBottomBar() string {
 	filler := barStyle.Render(strings.Repeat(" ", gap))
 
 	return content + filler
+}
+
+func (m model) viewOptions(width, height int) string {
+	type option struct {
+		label string
+		value string
+	}
+	options := []option{
+		{"Color theme", "Default"},
+		{"Truecolor", "True"},
+		{"Graph symbol", "Braille"},
+	}
+
+	innerWidth := 36
+
+	borderStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("63")).
+		Background(lipgloss.Color("235"))
+
+	titleStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("205")).
+		Bold(true).
+		Background(lipgloss.Color("235")).
+		Width(innerWidth)
+
+	normalLabel := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("245")).
+		Background(lipgloss.Color("235"))
+
+	normalValue := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("255")).
+		Background(lipgloss.Color("235"))
+
+	selectedStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("255")).
+		Bold(true).
+		Background(lipgloss.Color("63"))
+
+	hintStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("241")).
+		Background(lipgloss.Color("235")).
+		Width(innerWidth)
+
+	bgStyle := lipgloss.NewStyle().
+		Background(lipgloss.Color("235"))
+
+	var rows []string
+	rows = append(rows, titleStyle.Render(" Options"))
+	rows = append(rows, bgStyle.Render(strings.Repeat(" ", innerWidth)))
+
+	for i, opt := range options {
+		valueStr := "‹ " + opt.value + " ›"
+		gap := innerWidth - len(opt.label) - len(valueStr) - 2 // -2 for leading/trailing space
+		if gap < 1 {
+			gap = 1
+		}
+		if i == m.optionsCursor {
+			line := selectedStyle.Render(" " + opt.label + strings.Repeat(" ", gap) + valueStr + " ")
+			rows = append(rows, line)
+		} else {
+			line := normalLabel.Render(" "+opt.label) +
+				bgStyle.Render(strings.Repeat(" ", gap)) +
+				normalValue.Render(valueStr+" ")
+			rows = append(rows, line)
+		}
+	}
+
+	rows = append(rows, bgStyle.Render(strings.Repeat(" ", innerWidth)))
+	rows = append(rows, hintStyle.Render(" esc/o: close  j/k: navigate"))
+
+	content := strings.Join(rows, "\n")
+	box := borderStyle.Render(content)
+
+	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, box)
 }
