@@ -34,11 +34,12 @@ type authorInfo struct {
 }
 
 type contributorsPage struct {
-	commits   []CommitInfo
-	authors   []authorInfo
-	cursor    int
-	offset    int // scroll offset for left panel
-	needFiles bool
+	commits     []CommitInfo
+	authors     []authorInfo
+	cursor      int
+	offset      int // scroll offset for left panel
+	needFiles   bool
+	graphSymbol GraphSymbol
 }
 
 func newContributorsPage() *contributorsPage { return &contributorsPage{} }
@@ -50,6 +51,8 @@ func (p *contributorsPage) Update(msg tea.Msg) (Page, tea.Cmd) {
 	case commitsDataMsg:
 		p.commits = msg.commits
 		p.recompute()
+	case graphSymbolMsg:
+		p.graphSymbol = msg.symbol
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "j", "down":
@@ -440,7 +443,7 @@ func (p *contributorsPage) renderRightPanel(width, height int) string {
 			chartHeight = 4
 		}
 
-		chartStr := renderMiniChart(a.WeeklyData, chartWidth, chartHeight)
+		chartStr := renderMiniChart(a.WeeklyData, chartWidth, chartHeight, p.graphSymbol)
 		for _, line := range strings.Split(chartStr, "\n") {
 			if line != "" {
 				b.WriteString(" ")
@@ -546,8 +549,8 @@ func (p *contributorsPage) renderRightPanel(width, height int) string {
 	return b.String()
 }
 
-// renderMiniChart renders a small braille area chart without axes.
-func renderMiniChart(values []int, width, height int) string {
+// renderMiniChart renders a small area chart without axes.
+func renderMiniChart(values []int, width, height int, symbol GraphSymbol) string {
 	if len(values) == 0 || width < 2 || height < 1 {
 		return ""
 	}
@@ -562,14 +565,20 @@ func renderMiniChart(values []int, width, height int) string {
 		return ""
 	}
 
-	// Each braille cell = 2 data columns.
-	maxData := width * 2
+	pointsPerCell := 1
+	subRows := 8
+	if symbol == GraphBraille {
+		pointsPerCell = 2
+		subRows = 4
+	}
+
+	maxData := width * pointsPerCell
 	data := values
 	if len(data) > maxData {
 		data = data[len(data)-maxData:]
 	}
 
-	totalDotRows := height * 4
+	totalDotRows := height * subRows
 
 	// Scale data.
 	scaled := make([]int, len(data))
@@ -577,29 +586,47 @@ func renderMiniChart(values []int, width, height int) string {
 		scaled[i] = v * totalDotRows / maxVal
 	}
 
-	charCols := (len(data) + 1) / 2
+	charCols := len(data)
+	if symbol == GraphBraille {
+		charCols = (len(data) + 1) / 2
+	}
 	chartStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("82"))
 
 	var b strings.Builder
 	for r := 0; r < height; r++ {
-		rowBottom := (height - 1 - r) * 4
-		for cc := 0; cc < charCols && cc < width; cc++ {
-			li := cc * 2
-			ri := cc*2 + 1
-			lh, rh := 0, 0
-			if li < len(scaled) {
-				lh = scaled[li]
+		rowBottom := (height - 1 - r) * subRows
+		if symbol == GraphBraille {
+			for cc := 0; cc < charCols && cc < width; cc++ {
+				li := cc * 2
+				ri := cc*2 + 1
+				lh, rh := 0, 0
+				if li < len(scaled) {
+					lh = scaled[li]
+				}
+				if ri < len(scaled) {
+					rh = scaled[ri]
+				}
+				ld := clampInt(lh-rowBottom, 0, 4)
+				rd := clampInt(rh-rowBottom, 0, 4)
+				if ld == 0 && rd == 0 {
+					b.WriteRune(' ')
+				} else {
+					ch := rune(0x2800 + brailleLeftFill[ld] + brailleRightFill[rd])
+					b.WriteString(chartStyle.Render(string(ch)))
+				}
 			}
-			if ri < len(scaled) {
-				rh = scaled[ri]
-			}
-			ld := clampInt(lh-rowBottom, 0, 4)
-			rd := clampInt(rh-rowBottom, 0, 4)
-			if ld == 0 && rd == 0 {
-				b.WriteRune(' ')
-			} else {
-				ch := rune(0x2800 + brailleLeftFill[ld] + brailleRightFill[rd])
-				b.WriteString(chartStyle.Render(string(ch)))
+		} else {
+			for cc := 0; cc < charCols && cc < width; cc++ {
+				h := 0
+				if cc < len(scaled) {
+					h = scaled[cc]
+				}
+				fill := clampInt(h-rowBottom, 0, 8)
+				if fill == 0 {
+					b.WriteRune(' ')
+				} else {
+					b.WriteString(chartStyle.Render(vBlockChars[fill]))
+				}
 			}
 		}
 		b.WriteString("\n")

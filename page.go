@@ -16,6 +16,19 @@ type Page interface {
 	View(width, height int) string
 }
 
+// GraphSymbol selects the rendering style for area charts.
+type GraphSymbol int
+
+const (
+	GraphBraille GraphSymbol = iota
+	GraphBlock
+)
+
+// graphSymbolMsg is sent when the user changes the graph symbol setting.
+type graphSymbolMsg struct {
+	symbol GraphSymbol
+}
+
 // Tab identifiers.
 const (
 	TabSummary      = 0
@@ -99,10 +112,11 @@ func smoothBar(value, maxValue, maxWidth int, style lipgloss.Style) (string, int
 	return b.String(), charWidth
 }
 
-// renderBarChart renders a braille area chart of commit stats.
-// Uses Unicode braille characters for smooth, btop-style rendering
-// with 2× horizontal and 4× vertical sub-character resolution.
-func renderBarChart(allStats []DayStat, granularity Granularity, width, height int) string {
+// Vertical block characters for block-based charts (1/8 to full block).
+var vBlockChars = []string{" ", "▁", "▂", "▃", "▄", "▅", "▆", "▇", "█"}
+
+// renderBarChart renders an area chart of commit stats.
+func renderBarChart(allStats []DayStat, granularity Granularity, width, height int, symbol GraphSymbol) string {
 	if len(allStats) == 0 {
 		return "\n  No commit data."
 	}
@@ -112,8 +126,14 @@ func renderBarChart(allStats []DayStat, granularity Granularity, width, height i
 		cols = 10
 	}
 
-	// Each braille cell covers 2 data points, so we can show 2× as many.
-	maxDataPoints := cols * 2
+	// Braille packs 2 data points per cell; block uses 1.
+	pointsPerCell := 1
+	subRows := 8 // block: 8 sub-rows per character (▁▂▃▄▅▆▇█)
+	if symbol == GraphBraille {
+		pointsPerCell = 2
+		subRows = 4
+	}
+	maxDataPoints := cols * pointsPerCell
 	stats := allStats
 	if len(stats) > maxDataPoints {
 		stats = stats[len(stats)-maxDataPoints:]
@@ -127,7 +147,7 @@ func renderBarChart(allStats []DayStat, granularity Granularity, width, height i
 		chartHeight = 24
 	}
 
-	totalDotRows := chartHeight * 4
+	totalDotRows := chartHeight * subRows
 
 	maxCount := 0
 	peakDate := time.Time{}
@@ -149,7 +169,10 @@ func renderBarChart(allStats []DayStat, granularity Granularity, width, height i
 		dotHeights[i] = s.Count * totalDotRows / maxCount
 	}
 
-	charCols := (len(stats) + 1) / 2
+	charCols := len(stats)
+	if symbol == GraphBraille {
+		charCols = (len(stats) + 1) / 2
+	}
 
 	// Row gradient styles (row 0 = top of chart).
 	rowStyles := make([]lipgloss.Style, chartHeight)
@@ -183,7 +206,7 @@ func renderBarChart(allStats []DayStat, granularity Granularity, width, height i
 		strings.Join(granParts, dimStyle.Render(" / "))))
 	b.WriteString("\n\n")
 
-	// Render chart rows using braille characters.
+	// Render chart rows.
 	for r := 0; r < chartHeight; r++ {
 		// Y-axis label.
 		label := ""
@@ -202,29 +225,44 @@ func renderBarChart(allStats []DayStat, granularity Granularity, width, height i
 			b.WriteString("│")
 		}
 
-		rowBottom := (chartHeight - 1 - r) * 4
+		rowBottom := (chartHeight - 1 - r) * subRows
 
-		for cc := 0; cc < charCols; cc++ {
-			leftIdx := cc * 2
-			rightIdx := cc*2 + 1
+		if symbol == GraphBraille {
+			for cc := 0; cc < charCols; cc++ {
+				leftIdx := cc * 2
+				rightIdx := cc*2 + 1
 
-			leftH := 0
-			if leftIdx < len(dotHeights) {
-				leftH = dotHeights[leftIdx]
+				leftH := 0
+				if leftIdx < len(dotHeights) {
+					leftH = dotHeights[leftIdx]
+				}
+				rightH := 0
+				if rightIdx < len(dotHeights) {
+					rightH = dotHeights[rightIdx]
+				}
+
+				ld := clampInt(leftH-rowBottom, 0, 4)
+				rd := clampInt(rightH-rowBottom, 0, 4)
+
+				if ld == 0 && rd == 0 {
+					b.WriteRune(' ')
+				} else {
+					ch := rune(0x2800 + brailleLeftFill[ld] + brailleRightFill[rd])
+					b.WriteString(rowStyles[r].Render(string(ch)))
+				}
 			}
-			rightH := 0
-			if rightIdx < len(dotHeights) {
-				rightH = dotHeights[rightIdx]
-			}
-
-			ld := clampInt(leftH-rowBottom, 0, 4)
-			rd := clampInt(rightH-rowBottom, 0, 4)
-
-			if ld == 0 && rd == 0 {
-				b.WriteRune(' ')
-			} else {
-				ch := rune(0x2800 + brailleLeftFill[ld] + brailleRightFill[rd])
-				b.WriteString(rowStyles[r].Render(string(ch)))
+		} else {
+			for cc := 0; cc < charCols; cc++ {
+				h := 0
+				if cc < len(dotHeights) {
+					h = dotHeights[cc]
+				}
+				fill := clampInt(h-rowBottom, 0, 8)
+				if fill == 0 {
+					b.WriteRune(' ')
+				} else {
+					b.WriteString(rowStyles[r].Render(vBlockChars[fill]))
+				}
 			}
 		}
 		b.WriteString("\n")
@@ -235,7 +273,7 @@ func renderBarChart(allStats []DayStat, granularity Granularity, width, height i
 	b.WriteString(strings.Repeat("─", charCols))
 	b.WriteString("\n")
 
-	// Month labels (adjusted for braille: 2 data points per character cell).
+	// Month labels.
 	monthLine := make([]byte, charCols)
 	for i := range monthLine {
 		monthLine[i] = ' '
@@ -263,7 +301,7 @@ func renderBarChart(allStats []DayStat, granularity Granularity, width, height i
 			}
 		}
 
-		charPos := i / 2
+		charPos := i / pointsPerCell
 		if showLabel && charPos-lastLabel >= len(label)+1 {
 			for j := 0; j < len(label) && charPos+j < len(monthLine); j++ {
 				monthLine[charPos+j] = label[j]

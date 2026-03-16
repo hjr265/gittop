@@ -32,6 +32,7 @@ type summaryPage struct {
 	latestTag    string // name of latest tag
 	tagDate      time.Time
 	commitsSince int // commits since latest tag
+	graphSymbol  GraphSymbol
 }
 
 func newSummaryPage() *summaryPage {
@@ -50,6 +51,8 @@ func (p *summaryPage) Update(msg tea.Msg) (Page, tea.Cmd) {
 			p.tagDate = msg.tags[0].Date
 			p.commitsSince = msg.commitsSince
 		}
+	case graphSymbolMsg:
+		p.graphSymbol = msg.symbol
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "d":
@@ -153,7 +156,7 @@ func (p *summaryPage) View(width, height int) string {
 
 	// Bar chart.
 	aggregated := AggregateStats(stats, p.granularity)
-	b.WriteString(renderBarChart(aggregated, p.granularity, width, height-7))
+	b.WriteString(renderBarChart(aggregated, p.granularity, width, height-7, p.graphSymbol))
 
 	return b.String()
 }

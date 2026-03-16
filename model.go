@@ -63,6 +63,7 @@ type model struct {
 	// Options menu.
 	optionsOpen   bool
 	optionsCursor int
+	graphSymbol   GraphSymbol
 }
 
 type commitsMsg struct {
@@ -375,6 +376,20 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "down", "j":
 				if m.optionsCursor < 2 {
 					m.optionsCursor++
+				}
+			case "left", "right", "h", "l", "enter":
+				// Cycle graph symbol (only option that has multiple values).
+				if m.optionsCursor == 2 {
+					if m.graphSymbol == GraphBraille {
+						m.graphSymbol = GraphBlock
+					} else {
+						m.graphSymbol = GraphBraille
+					}
+					msg := graphSymbolMsg{symbol: m.graphSymbol}
+					for i, p := range m.pages {
+						updated, _ := p.Update(msg)
+						m.pages[i] = updated
+					}
 				}
 			}
 			return m, nil
@@ -827,10 +842,14 @@ func (m model) viewOptions(width, height int) string {
 		label string
 		value string
 	}
+	graphSymbolName := "Braille"
+	if m.graphSymbol == GraphBlock {
+		graphSymbolName = "Block"
+	}
 	options := []option{
 		{"Color theme", "Default"},
 		{"Truecolor", "True"},
-		{"Graph symbol", "Braille"},
+		{"Graph symbol", graphSymbolName},
 	}
 
 	innerWidth := 36
@@ -889,7 +908,7 @@ func (m model) viewOptions(width, height int) string {
 	}
 
 	rows = append(rows, bgStyle.Render(strings.Repeat(" ", innerWidth)))
-	rows = append(rows, hintStyle.Render(" esc/o: close  j/k: navigate"))
+	rows = append(rows, hintStyle.Render(" esc: close  j/k: nav  h/l: change"))
 
 	content := strings.Join(rows, "\n")
 	box := borderStyle.Render(content)
