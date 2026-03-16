@@ -22,17 +22,52 @@ func openBareRepository(path string) (*git.Repository, error) {
 	return git.Open(stor, nil)
 }
 
+func openFromEnv() (*git.Repository, string, error) {
+	gitDir := os.Getenv("GIT_DIR")
+	if gitDir == "" {
+		return nil, "", fmt.Errorf("GIT_DIR not set")
+	}
+	gitDir, err := filepath.Abs(gitDir)
+	if err != nil {
+		return nil, "", err
+	}
+	dotgitFs := osfs.New(gitDir)
+	stor := filesystem.NewStorage(dotgitFs, cache.NewObjectLRUDefault())
+
+	workTree := os.Getenv("GIT_WORK_TREE")
+	if workTree != "" {
+		workTree, err = filepath.Abs(workTree)
+		if err != nil {
+			return nil, "", err
+		}
+		wtFs := osfs.New(workTree)
+		repo, err := git.Open(stor, wtFs)
+		return repo, workTree, err
+	}
+
+	repo, err := git.Open(stor, nil)
+	return repo, gitDir, err
+}
+
 func main() {
 	path := "."
 	if len(os.Args) > 1 {
 		path = os.Args[1]
 	}
 
-	repo, err := git.PlainOpenWithOptions(path, &git.PlainOpenOptions{
-		DetectDotGit: true,
-	})
-	if err != nil {
-		repo, err = openBareRepository(path)
+	var repo *git.Repository
+	var err error
+
+	if len(os.Args) <= 1 {
+		repo, path, err = openFromEnv()
+	}
+	if err != nil || repo == nil {
+		repo, err = git.PlainOpenWithOptions(path, &git.PlainOpenOptions{
+			DetectDotGit: true,
+		})
+		if err != nil {
+			repo, err = openBareRepository(path)
+		}
 	}
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: not a git repository: %s\n", path)
