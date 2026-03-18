@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"sort"
 	"strings"
@@ -334,6 +335,9 @@ type BranchInfo struct {
 	Author     string
 	Ahead      int // commits ahead of default branch
 	Behind     int // commits behind default branch
+	Stale      bool   // true if last commit is older than 90 days
+	RemoteGone bool   // true if upstream remote branch no longer exists
+	HasRemote  bool   // true if branch tracks a remote branch
 }
 
 // CollectBranches enumerates local branches and computes ahead/behind vs HEAD.
@@ -347,6 +351,21 @@ func CollectBranches(repo *git.Repository, mm *Mailmap) ([]BranchInfo, error) {
 		return nil, err
 	}
 	_ = headCommit
+
+	// Build a set of remote-tracking branch refs for quick lookup.
+	remoteRefs := map[string]bool{}
+	refs, err := repo.References()
+	if err == nil {
+		refs.ForEach(func(ref *plumbing.Reference) error {
+			if ref.Name().IsRemote() {
+				remoteRefs[ref.Name().String()] = true
+			}
+			return nil
+		})
+	}
+
+	cfg, _ := repo.Config()
+	now := time.Now()
 
 	branches, err := repo.Branches()
 	if err != nil {
@@ -367,12 +386,27 @@ func CollectBranches(repo *git.Repository, mm *Mailmap) ([]BranchInfo, error) {
 			IsCurrent:  headRef.Name().IsBranch() && headRef.Name().Short() == name,
 			LastCommit: commit.Author.When,
 			Author:     authorName,
+			Stale:      now.Sub(commit.Author.When) > 90*24*time.Hour,
 		}
 
 		if ref.Hash() != headRef.Hash() {
 			ahead, behind := computeAheadBehind(repo, ref.Hash(), headRef.Hash())
 			bi.Ahead = ahead
 			bi.Behind = behind
+		}
+
+		// Check remote tracking status.
+		if cfg != nil {
+			if brCfg, ok := cfg.Branches[name]; ok {
+				bi.HasRemote = true
+				remoteRef := fmt.Sprintf("refs/remotes/%s/%s", brCfg.Remote, brCfg.Name)
+				if brCfg.Name == "" {
+					remoteRef = fmt.Sprintf("refs/remotes/%s/%s", brCfg.Remote, name)
+				}
+				if !remoteRefs[remoteRef] {
+					bi.RemoteGone = true
+				}
+			}
 		}
 
 		result = append(result, bi)

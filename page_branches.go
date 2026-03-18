@@ -182,12 +182,19 @@ func (p *branchesPage) View(width, height int) string {
 
 	// Header.
 	headerStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("245"))
-	b.WriteString(fmt.Sprintf("  %-*s %-*s %-*s %*s %*s\n",
-		nameWidth, headerStyle.Render("Branch"),
-		dateWidth, headerStyle.Render("Last Commit"),
-		authorWidth, headerStyle.Render("Author"),
-		aheadWidth, headerStyle.Render("Ahead"),
-		behindWidth, headerStyle.Render("Behind"),
+	hBranch := headerStyle.Render("Branch")
+	hDate := headerStyle.Render("Last Commit")
+	hAuthor := headerStyle.Render("Author")
+	hAhead := headerStyle.Render("Ahead")
+	hBehind := headerStyle.Render("Behind")
+	hStatus := headerStyle.Render("Status")
+	b.WriteString(fmt.Sprintf("  %s%s %s%s %s%s %s%s %s%s  %s\n",
+		hBranch, strings.Repeat(" ", max(0, nameWidth-2-len("Branch"))),
+		hDate, strings.Repeat(" ", max(0, dateWidth-len("Last Commit"))),
+		hAuthor, strings.Repeat(" ", max(0, authorWidth-len("Author"))),
+		strings.Repeat(" ", max(0, aheadWidth-len("Ahead"))), hAhead,
+		strings.Repeat(" ", max(0, behindWidth-len("Behind"))), hBehind,
+		hStatus,
 	))
 
 	now := time.Now()
@@ -201,6 +208,10 @@ func (p *branchesPage) View(width, height int) string {
 		br := p.branches[i]
 
 		name := br.Name
+		maxName := nameWidth - 2 // room for marker
+		if len(name) > maxName {
+			name = name[:maxName-1] + "…"
+		}
 		marker := "  "
 		if br.IsCurrent {
 			marker = "* "
@@ -210,17 +221,25 @@ func (p *branchesPage) View(width, height int) string {
 		}
 		displayName := marker + name
 		// Pad name column accounting for ANSI.
-		nameVisual := 2 + len(br.Name) // marker + raw name
+		nameVisual := 2 + min(len(br.Name), maxName) // marker + visible name
 		namePad := nameWidth - nameVisual
 		if namePad < 0 {
 			namePad = 0
 		}
 
 		date := formatRelativeDate(now, br.LastCommit)
+		datePad := dateWidth - len(date)
+		if datePad < 0 {
+			datePad = 0
+		}
 
 		author := br.Author
 		if len(author) > authorWidth {
 			author = author[:authorWidth-1] + "…"
+		}
+		authorPad := authorWidth - len(author)
+		if authorPad < 0 {
+			authorPad = 0
 		}
 
 		aheadStr := zeroStyle.Render(fmt.Sprintf("%*d", aheadWidth, br.Ahead))
@@ -232,17 +251,47 @@ func (p *branchesPage) View(width, height int) string {
 			behindStr = behindStyle.Render(fmt.Sprintf("%*d", behindWidth, br.Behind))
 		}
 
-		b.WriteString(fmt.Sprintf("%s%s %-*s %-*s %s %s\n",
+		// Status tags.
+		var statusTags []string
+		staleStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("208"))
+		goneStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("196"))
+		if br.Stale && !br.IsCurrent {
+			statusTags = append(statusTags, staleStyle.Render("stale"))
+		}
+		if br.RemoteGone {
+			statusTags = append(statusTags, goneStyle.Render("gone"))
+		}
+		status := strings.Join(statusTags, " ")
+
+		b.WriteString(fmt.Sprintf("%s%s %s%s %s%s %s %s  %s\n",
 			displayName, strings.Repeat(" ", namePad),
-			dateWidth, dimStyle.Render(date),
-			authorWidth, mutedStyle.Render(author),
+			dimStyle.Render(date), strings.Repeat(" ", datePad),
+			mutedStyle.Render(author), strings.Repeat(" ", authorPad),
 			aheadStr,
 			behindStr,
+			status,
 		))
 	}
 
 	b.WriteString("\n")
-	b.WriteString(dimStyle.Render(fmt.Sprintf("  %d branches", len(p.branches))))
+	staleCount := 0
+	goneCount := 0
+	for _, br := range p.branches {
+		if br.Stale && !br.IsCurrent {
+			staleCount++
+		}
+		if br.RemoteGone {
+			goneCount++
+		}
+	}
+	footer := fmt.Sprintf("  %d branches", len(p.branches))
+	if staleCount > 0 {
+		footer += fmt.Sprintf(" · %d stale", staleCount)
+	}
+	if goneCount > 0 {
+		footer += fmt.Sprintf(" · %d gone", goneCount)
+	}
+	b.WriteString(dimStyle.Render(footer))
 
 	return b.String()
 }
