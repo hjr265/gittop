@@ -2,7 +2,7 @@
 
 A beautiful terminal UI for visualizing Git repository statistics, inspired by htop/btop.
 
-![Go](https://img.shields.io/badge/Go-1.22+-00ADD8?logo=go&logoColor=white)
+![Go](https://img.shields.io/badge/Go-1.26+-00ADD8?logo=go&logoColor=white)
 
 ![Summary — KPI cards and commit activity chart](screenshots/summary.png)
 
