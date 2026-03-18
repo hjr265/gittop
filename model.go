@@ -781,6 +781,7 @@ func (m model) viewBottomBar() string {
 	}
 	if m.activeTab == TabContributors {
 		bindings = append(bindings,
+			struct{ key, desc string }{"v", "cycle view"},
 			struct{ key, desc string }{"j/k", "scroll"},
 		)
 	}

@@ -33,6 +33,16 @@ type authorInfo struct {
 	WeeklyData  []int // commits per calendar week, oldest first
 }
 
+type contributorsView int
+
+const (
+	viewRankedList contributorsView = iota
+	viewActivityLine
+	contributorsViewCount
+)
+
+var contributorsViewNames = []string{"Ranked", "Activity"}
+
 type contributorsPage struct {
 	commits     []CommitInfo
 	authors     []authorInfo
@@ -40,6 +50,7 @@ type contributorsPage struct {
 	offset      int // scroll offset for left panel
 	needFiles   bool
 	graphSymbol GraphSymbol
+	view        contributorsView
 }
 
 func newContributorsPage() *contributorsPage { return &contributorsPage{} }
@@ -55,6 +66,8 @@ func (p *contributorsPage) Update(msg tea.Msg) (Page, tea.Cmd) {
 		p.graphSymbol = msg.symbol
 	case tea.KeyMsg:
 		switch msg.String() {
+		case "v":
+			p.view = (p.view + 1) % contributorsViewCount
 		case "j", "down":
 			if p.cursor < len(p.authors)-1 {
 				p.cursor++
@@ -240,7 +253,13 @@ func (p *contributorsPage) View(width, height int) string {
 	}
 	rightWidth := width - leftWidth - 1 // 1 for separator
 
-	leftPanel := p.renderLeftPanel(leftWidth, contentHeight)
+	var leftPanel string
+	switch p.view {
+	case viewActivityLine:
+		leftPanel = p.renderActivityLinePanel(leftWidth, contentHeight)
+	default:
+		leftPanel = p.renderLeftPanel(leftWidth, contentHeight)
+	}
 	rightPanel := p.renderRightPanel(rightWidth, contentHeight)
 
 	// Join panels with a vertical separator.
@@ -253,14 +272,29 @@ func (p *contributorsPage) View(width, height int) string {
 	return lipgloss.JoinHorizontal(lipgloss.Top, leftStyled, separator, rightStyled)
 }
 
+func (p *contributorsPage) renderViewHeader() string {
+	var viewHeaderParts []string
+	for i, name := range contributorsViewNames {
+		if contributorsView(i) == p.view {
+			viewHeaderParts = append(viewHeaderParts, boldStyle.Render(name))
+		} else {
+			viewHeaderParts = append(viewHeaderParts, dimStyle.Render(name))
+		}
+	}
+	return fmt.Sprintf("  %s  %s", dimStyle.Render("[v]iew"), strings.Join(viewHeaderParts, dimStyle.Render(" / ")))
+}
+
 func (p *contributorsPage) renderLeftPanel(width, height int) string {
 	var b strings.Builder
 	b.WriteString("\n")
 
+	b.WriteString(p.renderViewHeader())
+	b.WriteString("\n\n")
+
 	b.WriteString(dimStyle.Render(fmt.Sprintf("  %d contributors", len(p.authors))))
 	b.WriteString("\n\n")
 
-	visibleRows := height - 3
+	visibleRows := height - 5
 	if visibleRows < 1 {
 		visibleRows = 1
 	}
@@ -351,6 +385,184 @@ func (p *contributorsPage) renderLeftPanel(width, height int) string {
 
 		if i == p.cursor {
 			// Pad to full width for highlight.
+			visual := lipgloss.Width(line)
+			if visual < width {
+				line += strings.Repeat(" ", width-visual)
+			}
+			line = selectedStyle.Render(line)
+		}
+
+		b.WriteString(line)
+		b.WriteString("\n")
+	}
+
+	return b.String()
+}
+
+func (p *contributorsPage) renderActivityLinePanel(width, height int) string {
+	var b strings.Builder
+	b.WriteString("\n")
+
+	b.WriteString(p.renderViewHeader())
+	b.WriteString("\n\n")
+
+	b.WriteString(dimStyle.Render(fmt.Sprintf("  %d contributors", len(p.authors))))
+	b.WriteString("\n\n")
+
+	visibleRows := height - 4
+	if visibleRows < 1 {
+		visibleRows = 1
+	}
+
+	// Ensure cursor visible.
+	if p.cursor < p.offset {
+		p.offset = p.cursor
+	}
+	if p.cursor >= p.offset+visibleRows {
+		p.offset = p.cursor - visibleRows + 1
+	}
+	maxOffset := len(p.authors) - visibleRows
+	if maxOffset < 0 {
+		maxOffset = 0
+	}
+	if p.offset > maxOffset {
+		p.offset = maxOffset
+	}
+
+	end := p.offset + visibleRows
+	if end > len(p.authors) {
+		end = len(p.authors)
+	}
+
+	// Determine the global time range across all visible authors.
+	var globalFirst, globalLast time.Time
+	for _, a := range p.authors {
+		if globalFirst.IsZero() || a.FirstCommit.Before(globalFirst) {
+			globalFirst = a.FirstCommit
+		}
+		if globalLast.IsZero() || a.LastCommit.After(globalLast) {
+			globalLast = a.LastCommit
+		}
+	}
+	now := time.Now()
+	if now.After(globalLast) {
+		globalLast = now
+	}
+	globalSpan := globalLast.Sub(globalFirst)
+	if globalSpan <= 0 {
+		globalSpan = 24 * time.Hour
+	}
+
+	// Compute column widths.
+	nameWidth := 0
+	for i := p.offset; i < end; i++ {
+		if l := len(p.authors[i].Name); l > nameWidth {
+			nameWidth = l
+		}
+	}
+	maxNameWidth := width/3 - 4
+	if maxNameWidth < 8 {
+		maxNameWidth = 8
+	}
+	if nameWidth > maxNameWidth {
+		nameWidth = maxNameWidth
+	}
+
+	lineWidth := width - nameWidth - 5 // marker + spaces + name + space
+	if lineWidth < 5 {
+		lineWidth = 5
+	}
+
+	selectedStyle := lipgloss.NewStyle().Background(lipgloss.Color("237"))
+	activeColor := lipgloss.NewStyle().Foreground(lipgloss.Color("82"))
+	dormantColor := lipgloss.NewStyle().Foreground(lipgloss.Color("196"))
+
+
+	const dormantThreshold = 90 * 24 * time.Hour
+
+	// Precompute per-author bucket hits for the visible authors.
+	// Each bucket corresponds to one column of the activity line.
+	type authorBuckets struct {
+		hits       []bool      // true if author committed in this bucket
+		lastBefore []time.Time // most recent commit date on or before bucket start
+	}
+	bucketData := make(map[string]*authorBuckets)
+	for i := p.offset; i < end; i++ {
+		ab := &authorBuckets{
+			hits:       make([]bool, lineWidth),
+			lastBefore: make([]time.Time, lineWidth),
+		}
+		bucketData[p.authors[i].Name] = ab
+		// Initialize lastBefore with the author's first commit.
+		for col := range ab.lastBefore {
+			ab.lastBefore[col] = p.authors[i].FirstCommit
+		}
+	}
+	for ci := range p.commits {
+		c := &p.commits[ci]
+		ab, ok := bucketData[c.Author]
+		if !ok {
+			continue
+		}
+		col := int(c.Date.Sub(globalFirst) * time.Duration(lineWidth) / globalSpan)
+		if col >= lineWidth {
+			col = lineWidth - 1
+		}
+		if col < 0 {
+			col = 0
+		}
+		ab.hits[col] = true
+		if c.Date.After(ab.lastBefore[col]) {
+			ab.lastBefore[col] = c.Date
+		}
+	}
+	// Forward-propagate lastBefore so each bucket knows the most recent commit at or before it.
+	for _, ab := range bucketData {
+		for col := 1; col < lineWidth; col++ {
+			if ab.lastBefore[col-1].After(ab.lastBefore[col]) {
+				ab.lastBefore[col] = ab.lastBefore[col-1]
+			}
+		}
+	}
+
+	for i := p.offset; i < end; i++ {
+		a := &p.authors[i]
+		name := a.Name
+		if len(name) > nameWidth {
+			name = name[:nameWidth-1] + "…"
+		}
+
+		marker := " "
+		if i == p.cursor {
+			marker = "▸"
+		}
+
+		ab := bucketData[a.Name]
+
+		// Build per-column activity line.
+		var lineBuf strings.Builder
+		for col := 0; col < lineWidth; col++ {
+			t := globalFirst.Add(globalSpan * time.Duration(col) / time.Duration(lineWidth))
+
+			if t.Before(a.FirstCommit) || t.After(a.LastCommit) {
+				lineBuf.WriteRune(' ')
+				continue
+			}
+
+			if ab.hits[col] {
+				lineBuf.WriteString(activeColor.Render("━"))
+			} else {
+				if t.Sub(ab.lastBefore[col]) > dormantThreshold {
+					lineBuf.WriteString(dormantColor.Render("━"))
+				} else {
+					lineBuf.WriteString(activeColor.Render("─"))
+				}
+			}
+		}
+
+		line := fmt.Sprintf(" %s %-*s %s", marker, nameWidth, name, lineBuf.String())
+
+		if i == p.cursor {
 			visual := lipgloss.Width(line)
 			if visual < width {
 				line += strings.Repeat(" ", width-visual)
