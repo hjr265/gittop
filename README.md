@@ -10,16 +10,16 @@ Prototyped rapidly with an agentic coding tool. Read the [blog post](https://hjr
 
 ## Install
 
-### Homebrew
-
-``` sh
-brew install hjr265/gittop/gittop
-```
-
 ### Arch Linux (AUR)
 
 ``` sh
 yay -S gittop
+```
+
+### Homebrew
+
+``` sh
+brew install hjr265/gittop/gittop
 ```
 
 ### Go
