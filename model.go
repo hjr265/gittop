@@ -27,7 +27,8 @@ type model struct {
 	activeTab int
 	pages     []Page
 
-	branch string
+	branch  string
+	mailmap *Mailmap
 
 	// Commit data.
 	commits         []CommitInfo // all commits (without files)
@@ -70,6 +71,7 @@ type commitsMsg struct {
 	commits []CommitInfo
 	branch  string
 	err     error
+	mailmap *Mailmap
 }
 
 // commitsWithFilesMsg is sent when a re-scan with file info completes.
@@ -121,7 +123,8 @@ func newModel(repo *git.Repository, path string) model {
 
 func (m model) Init() tea.Cmd {
 	return func() tea.Msg {
-		commits, err := CollectCommits(m.repo, false)
+		mm := LoadMailmap(m.repo)
+		commits, err := CollectCommits(m.repo, false, mm)
 		branch := ""
 		if ref, e := m.repo.Head(); e == nil {
 			if ref.Name().IsBranch() {
@@ -130,7 +133,7 @@ func (m model) Init() tea.Cmd {
 				branch = ref.Hash().String()[:8]
 			}
 		}
-		return commitsMsg{commits: commits, branch: branch, err: err}
+		return commitsMsg{commits: commits, branch: branch, err: err, mailmap: mm}
 	}
 }
 
@@ -293,6 +296,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.commits = msg.commits
 		m.branch = msg.branch
 		m.err = msg.err
+		m.mailmap = msg.mailmap
 		m.loading = false
 		m.stats = CommitsToDailyStats(m.commits)
 		m.filteredStats = m.stats
@@ -407,8 +411,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// If filter needs files and we don't have them, trigger re-scan.
 				if m.filterExpr != nil && FilterNeedsFiles(m.filterExpr) && m.commitsWithFiles == nil && !m.filtering {
 					m.filtering = true
+					mm := m.mailmap
 					return m, func() tea.Msg {
-						commits, err := CollectCommits(m.repo, true)
+						commits, err := CollectCommits(m.repo, true, mm)
 						return commitsWithFilesMsg{commits: commits, err: err}
 					}
 				}
@@ -504,7 +509,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.commitsSince = 0
 			repo := m.repo
 			return m, func() tea.Msg {
-				commits, err := CollectCommits(repo, false)
+				mm := LoadMailmap(repo)
+				commits, err := CollectCommits(repo, false, mm)
 				branch := ""
 				if ref, e := repo.Head(); e == nil {
 					if ref.Name().IsBranch() {
@@ -513,7 +519,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						branch = ref.Hash().String()[:8]
 					}
 				}
-				return commitsMsg{commits: commits, branch: branch, err: err}
+				return commitsMsg{commits: commits, branch: branch, err: err, mailmap: mm}
 			}
 		case "o":
 			m.optionsOpen = true
@@ -536,8 +542,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if m.activeTab == TabBranches && !m.branchesLoaded && !m.branchesLoading {
 		m.branchesLoading = true
 		repo := m.repo
+		mm := m.mailmap
 		return m, func() tea.Msg {
-			branches, err := CollectBranches(repo)
+			branches, err := CollectBranches(repo, mm)
 			return branchesDataMsg{branches: branches, err: err}
 		}
 	}
@@ -546,8 +553,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if m.activeTab == TabContributors && m.commitsWithFiles == nil && !m.filtering {
 		m.filtering = true
 		repo := m.repo
+		mm := m.mailmap
 		return m, func() tea.Msg {
-			commits, err := CollectCommits(repo, true)
+			commits, err := CollectCommits(repo, true, mm)
 			return commitsWithFilesMsg{commits: commits, err: err}
 		}
 	}
@@ -556,6 +564,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if m.activeTab == TabFiles && !m.healthLoaded && !m.healthLoading {
 		m.healthLoading = true
 		repo := m.repo
+		mm := m.mailmap
 		cmds := []tea.Cmd{
 			func() tea.Msg {
 				lineCounts, err := CollectFileLineCounts(repo)
@@ -566,7 +575,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.commitsWithFiles == nil && !m.filtering {
 			m.filtering = true
 			cmds = append(cmds, func() tea.Msg {
-				commits, err := CollectCommits(repo, true)
+				commits, err := CollectCommits(repo, true, mm)
 				return commitsWithFilesMsg{commits: commits, err: err}
 			})
 		}

@@ -34,7 +34,7 @@ type CommitInfo struct {
 // CollectCommits walks the entire commit log reachable from HEAD and
 // returns per-commit metadata. If needFiles is true, each commit's
 // changed file paths are computed (slower).
-func CollectCommits(repo *git.Repository, needFiles bool) ([]CommitInfo, error) {
+func CollectCommits(repo *git.Repository, needFiles bool, mm *Mailmap) ([]CommitInfo, error) {
 	ref, err := repo.Head()
 	if err != nil {
 		return nil, err
@@ -48,10 +48,11 @@ func CollectCommits(repo *git.Repository, needFiles bool) ([]CommitInfo, error) 
 	var commits []CommitInfo
 	err = iter.ForEach(func(c *object.Commit) error {
 		when := c.Author.When
+		name, email := mm.Resolve(c.Author.Name, c.Author.Email)
 		ci := CommitInfo{
 			Hash:    c.Hash.String(),
-			Author:  c.Author.Name,
-			Email:   c.Author.Email,
+			Author:  name,
+			Email:   email,
 			Date:    truncateToDay(when),
 			Hour:    when.Hour(),
 			Weekday: when.Weekday(),
@@ -336,7 +337,7 @@ type BranchInfo struct {
 }
 
 // CollectBranches enumerates local branches and computes ahead/behind vs HEAD.
-func CollectBranches(repo *git.Repository) ([]BranchInfo, error) {
+func CollectBranches(repo *git.Repository, mm *Mailmap) ([]BranchInfo, error) {
 	headRef, err := repo.Head()
 	if err != nil {
 		return nil, err
@@ -360,11 +361,12 @@ func CollectBranches(repo *git.Repository) ([]BranchInfo, error) {
 			return nil
 		}
 
+		authorName, _ := mm.Resolve(commit.Author.Name, commit.Author.Email)
 		bi := BranchInfo{
 			Name:       name,
 			IsCurrent:  headRef.Name().IsBranch() && headRef.Name().Short() == name,
 			LastCommit: commit.Author.When,
-			Author:     commit.Author.Name,
+			Author:     authorName,
 		}
 
 		if ref.Hash() != headRef.Hash() {
