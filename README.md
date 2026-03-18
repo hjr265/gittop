@@ -10,6 +10,14 @@ Prototyped rapidly with an agentic coding tool. Read the [blog post](https://hjr
 
 ## Install
 
+### Homebrew
+
+``` sh
+brew install hjr265/gittop/gittop
+```
+
+### Go
+
 ``` sh
 go install github.com/hjr265/gittop@latest
 ```
