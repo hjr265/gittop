@@ -76,7 +76,7 @@ When no path is given, GitTop also respects the `GIT_DIR` and `GIT_WORK_TREE` en
 | `Esc` | Clear filter or page-local search |
 | `r` | Refresh (re-scan repository) |
 | `d` / `w` / `m` / `y` | Chart granularity: daily, weekly, monthly, yearly (Summary) |
-| `v` | Cycle sub-views (Activity, Files, Releases) |
+| `v` | Cycle sub-views (Activity, Contributors, Files, Releases) |
 | `f` | File path filter (Files tab) |
 | `s` / `S` | Sort column / toggle order (Branches); search (Commits) |
 | `j` / `k` | Scroll down / up |
