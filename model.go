@@ -28,6 +28,7 @@ type model struct {
 	pages     []Page
 
 	branch  string
+	shallow bool
 	mailmap *Mailmap
 
 	// Commit data.
@@ -70,6 +71,7 @@ type model struct {
 type commitsMsg struct {
 	commits []CommitInfo
 	branch  string
+	shallow bool
 	err     error
 	mailmap *Mailmap
 }
@@ -93,6 +95,7 @@ type tagsDataMsg struct {
 type commitsDataMsg struct {
 	commits  []CommitInfo
 	filtered bool // true when a filter is active
+	shallow  bool
 }
 
 func newModel(repo *git.Repository, path string) model {
@@ -133,7 +136,11 @@ func (m model) Init() tea.Cmd {
 				branch = ref.Hash().String()[:8]
 			}
 		}
-		return commitsMsg{commits: commits, branch: branch, err: err, mailmap: mm}
+		shallow := false
+		if hashes, serr := m.repo.Storer.Shallow(); serr == nil && len(hashes) > 0 {
+			shallow = true
+		}
+		return commitsMsg{commits: commits, branch: branch, shallow: shallow, err: err, mailmap: mm}
 	}
 }
 
@@ -206,7 +213,7 @@ func (m *model) propagateStats() {
 		source = FilterCommits(source, m.filterExpr)
 	}
 	source = applyRangeCutoffCommits(source, cutoff)
-	cdMsg := commitsDataMsg{commits: source, filtered: m.filterExpr != nil}
+	cdMsg := commitsDataMsg{commits: source, filtered: m.filterExpr != nil, shallow: m.shallow}
 	for i, p := range m.pages {
 		updated, _ := p.Update(cdMsg)
 		m.pages[i] = updated
@@ -295,6 +302,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case commitsMsg:
 		m.commits = msg.commits
 		m.branch = msg.branch
+		m.shallow = msg.shallow
 		m.err = msg.err
 		m.mailmap = msg.mailmap
 		m.loading = false
@@ -519,7 +527,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						branch = ref.Hash().String()[:8]
 					}
 				}
-				return commitsMsg{commits: commits, branch: branch, err: err, mailmap: mm}
+				shallow := false
+				if hashes, serr := repo.Storer.Shallow(); serr == nil && len(hashes) > 0 {
+					shallow = true
+				}
+				return commitsMsg{commits: commits, branch: branch, shallow: shallow, err: err, mailmap: mm}
 			}
 		case "o":
 			m.optionsOpen = true
@@ -655,6 +667,12 @@ func (m model) viewTopBar() string {
 		topBarStyle.Render(m.repoPath) +
 		dimOnBar.Render("  ") +
 		branchStyle.Render(m.branch)
+	if m.shallow {
+		shallowStyle := lipgloss.NewStyle().
+			Background(lipgloss.Color("236")).
+			Foreground(lipgloss.Color("208"))
+		left += dimOnBar.Render(" ") + shallowStyle.Render("(shallow)")
+	}
 
 	// Show filter indicator.
 	filterIndicator := ""

@@ -24,6 +24,7 @@ type commitDiffMsg struct {
 type commitsPage struct {
 	repo    *git.Repository
 	commits []CommitInfo
+	shallow bool
 	offset  int // scroll offset (top of visible window)
 	cursor  int // selected row index (absolute, within filtered/full list)
 
@@ -52,6 +53,7 @@ func (p *commitsPage) Update(msg tea.Msg) (Page, tea.Cmd) {
 	switch msg := msg.(type) {
 	case commitsDataMsg:
 		p.commits = msg.commits
+		p.shallow = msg.shallow
 		p.refilter()
 		if p.cursor >= p.visibleLen() {
 			p.cursor = 0
@@ -388,6 +390,12 @@ func (p *commitsPage) viewList(width, height int) string {
 
 		b.WriteString(line)
 		b.WriteString("\n")
+	}
+
+	if p.shallow && end >= n {
+		shallowStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("208"))
+		b.WriteString("\n")
+		b.WriteString(fmt.Sprintf("  %s\n", shallowStyle.Render("⚠ Shallow clone — history is incomplete. Run `git fetch --unshallow` for full history.")))
 	}
 
 	return b.String()

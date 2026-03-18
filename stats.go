@@ -66,7 +66,7 @@ func CollectCommits(repo *git.Repository, needFiles bool, mm *Mailmap) ([]Commit
 		commits = append(commits, ci)
 		return nil
 	})
-	if err != nil {
+	if err != nil && err != plumbing.ErrObjectNotFound {
 		return nil, err
 	}
 
