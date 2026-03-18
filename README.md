@@ -16,6 +16,12 @@ Prototyped rapidly with an agentic coding tool. Read the [blog post](https://hjr
 brew install hjr265/gittop/gittop
 ```
 
+### Arch Linux (AUR)
+
+``` sh
+yay -S gittop
+```
+
 ### Go
 
 ``` sh
