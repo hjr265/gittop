@@ -4,9 +4,12 @@ import (
 	"bufio"
 	"bytes"
 	"io"
+	"os"
 	"strings"
 
 	"github.com/go-git/go-git/v5"
+	"github.com/go-git/go-git/v5/config"
+	"github.com/go-git/go-git/v5/plumbing"
 )
 
 // Mailmap maps commit author name/email pairs to canonical ones.
@@ -16,7 +19,7 @@ type Mailmap struct {
 	byEmail map[string]mailmapMailbox
 
 	// byNameEmail maps a (commit name, commit email) pair to canonical values.
-	// Key: "name\x00email" (both lowercased).
+	// Key: "{name email}" (both lowercased).
 	byNameEmail map[mailmapMailbox]mailmapMailbox
 }
 
@@ -25,42 +28,61 @@ type mailmapMailbox struct {
 	email string
 }
 
-// LoadMailmap reads the .mailmap file from the repository's HEAD tree.
-// Returns an empty (no-op) Mailmap if the file doesn't exist.
+// LoadMailmap reads mailmap data from the repository. It loads the default
+// .mailmap file from HEAD, then applies any additional mappings from the
+// mailmap.file (filesystem path) and mailmap.blob (blob object) Git config
+// options.
 func LoadMailmap(repo *git.Repository) *Mailmap {
 	m := &Mailmap{
 		byEmail:     make(map[string]mailmapMailbox),
 		byNameEmail: make(map[mailmapMailbox]mailmapMailbox),
 	}
 
-	ref, err := repo.Head()
-	if err != nil {
-		return m
-	}
-	commit, err := repo.CommitObject(ref.Hash())
-	if err != nil {
-		return m
-	}
-	tree, err := commit.Tree()
-	if err != nil {
-		return m
-	}
-	f, err := tree.File(".mailmap")
-	if err != nil {
-		return m
-	}
-	reader, err := f.Reader()
-	if err != nil {
-		return m
-	}
-	defer reader.Close()
-
-	content, err := io.ReadAll(reader)
-	if err != nil {
-		return m
+	// Load default .mailmap from HEAD tree.
+	if ref, err := repo.Head(); err == nil {
+		if commit, err := repo.CommitObject(ref.Hash()); err == nil {
+			if tree, err := commit.Tree(); err == nil {
+				if f, err := tree.File(".mailmap"); err == nil {
+					if reader, err := f.Reader(); err == nil {
+						if content, err := io.ReadAll(reader); err == nil {
+							m.parse(content)
+						}
+						reader.Close()
+					}
+				}
+			}
+		}
 	}
 
-	m.parse(content)
+	// Check Git config for mailmap.file and mailmap.blob.
+	cfg, err := repo.ConfigScoped(config.GlobalScope)
+	if err != nil {
+		return m
+	}
+	raw := cfg.Raw
+	sec := raw.Section("mailmap")
+
+	// mailmap.file: read from filesystem path.
+	if filePath := sec.Option("file"); filePath != "" {
+		if content, err := os.ReadFile(filePath); err == nil {
+			m.parse(content)
+		}
+	}
+
+	// mailmap.blob: read from a blob object.
+	if blobRef := sec.Option("blob"); blobRef != "" {
+		if hash, err := repo.ResolveRevision(plumbing.Revision(blobRef)); err == nil {
+			if blob, err := repo.BlobObject(*hash); err == nil {
+				if reader, err := blob.Reader(); err == nil {
+					if content, err := io.ReadAll(reader); err == nil {
+						m.parse(content)
+					}
+					reader.Close()
+				}
+			}
+		}
+	}
+
 	return m
 }
 
