@@ -9,6 +9,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/go-git/go-git/v5"
+	"github.com/muesli/termenv"
 )
 
 const (
@@ -65,6 +66,7 @@ type model struct {
 	// Options menu.
 	optionsOpen   bool
 	optionsCursor int
+	truecolor     bool
 	graphSymbol   GraphSymbol
 }
 
@@ -104,6 +106,12 @@ func newModel(repo *git.Repository, path string) model {
 	ti.CharLimit = 256
 	ti.Width = 80
 
+	cfg := LoadConfig()
+	if cfg.Truecolor {
+		lipgloss.SetColorProfile(termenv.TrueColor)
+	} else {
+		lipgloss.SetColorProfile(termenv.ANSI256)
+	}
 	m := model{
 		repo:        repo,
 		repoPath:    path,
@@ -111,6 +119,8 @@ func newModel(repo *git.Repository, path string) model {
 		activeTab:   TabSummary,
 		rangeIdx:    defaultRangeIdx,
 		filterInput: ti,
+		truecolor:   cfg.Truecolor,
+		graphSymbol: cfg.GraphSymbolValue(),
 	}
 	m.pages = []Page{
 		newSummaryPage(),
@@ -120,6 +130,12 @@ func newModel(repo *git.Repository, path string) model {
 		newHealthPage(),
 		newReleasesPage(),
 		newCommitsPage(repo),
+	}
+	if m.graphSymbol != GraphBraille {
+		msg := graphSymbolMsg{symbol: m.graphSymbol}
+		for i, p := range m.pages {
+			m.pages[i], _ = p.Update(msg)
+		}
 	}
 	return m
 }
@@ -390,7 +406,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.optionsCursor++
 				}
 			case "left", "right", "h", "l", "enter":
-				// Cycle graph symbol (only option that has multiple values).
+				if m.optionsCursor == 1 {
+					m.truecolor = !m.truecolor
+					if m.truecolor {
+						lipgloss.SetColorProfile(termenv.TrueColor)
+					} else {
+						lipgloss.SetColorProfile(termenv.ANSI256)
+					}
+					_ = SaveConfig(m.ToConfig())
+				}
 				if m.optionsCursor == 2 {
 					if m.graphSymbol == GraphBraille {
 						m.graphSymbol = GraphBlock
@@ -402,6 +426,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						updated, _ := p.Update(msg)
 						m.pages[i] = updated
 					}
+					_ = SaveConfig(m.ToConfig())
 				}
 			}
 			return m, nil
@@ -870,13 +895,17 @@ func (m model) viewOptions(width, height int) string {
 		label string
 		value string
 	}
+	truecolorName := "False"
+	if m.truecolor {
+		truecolorName = "True"
+	}
 	graphSymbolName := "Braille"
 	if m.graphSymbol == GraphBlock {
 		graphSymbolName = "Block"
 	}
 	options := []option{
 		{"Color theme", "Default"},
-		{"Truecolor", "True"},
+		{"Truecolor", truecolorName},
 		{"Graph symbol", graphSymbolName},
 	}
 
