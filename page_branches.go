@@ -181,7 +181,7 @@ func (p *branchesPage) View(width, height int) string {
 	}
 
 	// Header.
-	headerStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("245"))
+	headerStyle := lipgloss.NewStyle().Bold(true).Foreground(mutedColor)
 	hBranch := headerStyle.Render("Branch")
 	hDate := headerStyle.Render("Last Commit")
 	hAuthor := headerStyle.Render("Author")
@@ -198,11 +198,11 @@ func (p *branchesPage) View(width, height int) string {
 	))
 
 	now := time.Now()
-	currentStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("82")).Bold(true)
-	nameStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("63"))
-	aheadStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("82"))
-	behindStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("196"))
-	zeroStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
+	currentStyle := lipgloss.NewStyle().Foreground(positiveColor).Bold(true)
+	nameStyle := lipgloss.NewStyle().Foreground(infoColor)
+	aheadStyle := lipgloss.NewStyle().Foreground(positiveColor)
+	behindStyle := lipgloss.NewStyle().Foreground(errorColor)
+	zeroStyleLocal := lipgloss.NewStyle().Foreground(zeroColor)
 
 	for i := p.offset; i < end; i++ {
 		br := p.branches[i]
@@ -242,19 +242,19 @@ func (p *branchesPage) View(width, height int) string {
 			authorPad = 0
 		}
 
-		aheadStr := zeroStyle.Render(fmt.Sprintf("%*d", aheadWidth, br.Ahead))
+		aheadStr := zeroStyleLocal.Render(fmt.Sprintf("%*d", aheadWidth, br.Ahead))
 		if br.Ahead > 0 {
 			aheadStr = aheadStyle.Render(fmt.Sprintf("%*d", aheadWidth, br.Ahead))
 		}
-		behindStr := zeroStyle.Render(fmt.Sprintf("%*d", behindWidth, br.Behind))
+		behindStr := zeroStyleLocal.Render(fmt.Sprintf("%*d", behindWidth, br.Behind))
 		if br.Behind > 0 {
 			behindStr = behindStyle.Render(fmt.Sprintf("%*d", behindWidth, br.Behind))
 		}
 
 		// Status tags.
 		var statusTags []string
-		staleStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("208"))
-		goneStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("196"))
+		staleStyle := lipgloss.NewStyle().Foreground(warningColor)
+		goneStyle := lipgloss.NewStyle().Foreground(errorColor)
 		if br.Stale && !br.IsCurrent {
 			statusTags = append(statusTags, staleStyle.Render("stale"))
 		}

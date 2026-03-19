@@ -287,19 +287,19 @@ func (p *commitsPage) viewList(width, height int) string {
 	var b strings.Builder
 	b.WriteString("\n")
 
-	hashStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("214"))
-	authorStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("82"))
-	dateStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
-	msgStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("255"))
-	selectedStyle := lipgloss.NewStyle().Background(lipgloss.Color("237"))
+	hashStyle := lipgloss.NewStyle().Foreground(tagColor)
+	authorStyle := lipgloss.NewStyle().Foreground(positiveColor)
+	dateStyle := lipgloss.NewStyle().Foreground(mutedColor)
+	msgStyle := lipgloss.NewStyle().Foreground(brightColor)
+	selectedStyle := lipgloss.NewStyle().Background(selectionBg)
 
 	// Header with count and search indicator.
 	header := fmt.Sprintf("%d commits", len(p.commits))
 	if p.searching {
-		filterStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Bold(true)
+		filterStyle := lipgloss.NewStyle().Foreground(tagColor).Bold(true)
 		header += "    search: " + filterStyle.Render(p.searchInput+"_")
 	} else if p.searchQuery != "" {
-		filterStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Bold(true)
+		filterStyle := lipgloss.NewStyle().Foreground(tagColor).Bold(true)
 		header = fmt.Sprintf("%d/%d commits    search: ", n, len(p.commits)) + filterStyle.Render(p.searchQuery)
 	}
 	b.WriteString(fmt.Sprintf("  %s\n\n", dimStyle.Render(header)))
@@ -393,7 +393,7 @@ func (p *commitsPage) viewList(width, height int) string {
 	}
 
 	if p.shallow && end >= n {
-		shallowStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("208"))
+		shallowStyle := lipgloss.NewStyle().Foreground(warningColor)
 		b.WriteString("\n")
 		b.WriteString(fmt.Sprintf("  %s\n", shallowStyle.Render("⚠ Shallow clone — history is incomplete. Run `git fetch --unshallow` for full history.")))
 	}
@@ -405,9 +405,9 @@ func (p *commitsPage) viewDiff(width, height int) string {
 	var b strings.Builder
 	b.WriteString("\n")
 
-	headerStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Bold(true)
+	diffHeaderStyle := lipgloss.NewStyle().Foreground(diffFileColor).Bold(true)
 	b.WriteString(fmt.Sprintf("  %s  %s\n",
-		headerStyle.Render(p.diffHeader),
+		diffHeaderStyle.Render(p.diffHeader),
 		dimStyle.Render("(esc back, j/k scroll)")))
 	b.WriteString("\n")
 
@@ -436,10 +436,10 @@ func (p *commitsPage) viewDiff(width, height int) string {
 		end = len(lines)
 	}
 
-	addStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("82"))
-	delStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("196"))
-	hunkStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("39"))
-	fileStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Bold(true)
+	addStyle := lipgloss.NewStyle().Foreground(diffAddedColor)
+	delStyle := lipgloss.NewStyle().Foreground(diffDeletedColor)
+	hunkStyle := lipgloss.NewStyle().Foreground(diffHunkColor)
+	fileStyle := lipgloss.NewStyle().Foreground(diffFileColor).Bold(true)
 
 	for _, line := range lines[p.diffOffset:end] {
 		displayLine := line

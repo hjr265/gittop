@@ -42,27 +42,19 @@ const (
 
 var tabNames = []string{"Summary", "Activity", "Contributors", "Branches", "Files", "Releases", "Commits"}
 
-// Shared styles.
+// Shared styles — set by ApplyTheme().
 var (
-	accentColor = lipgloss.Color("205")
-	dimColor    = lipgloss.Color("241")
-	brightColor = lipgloss.Color("255")
-	mutedColor  = lipgloss.Color("245")
+	accentColor lipgloss.Color
+	dimColor    lipgloss.Color
+	brightColor lipgloss.Color
+	mutedColor  lipgloss.Color
 
-	titleStyle = lipgloss.NewStyle().Bold(true).Foreground(accentColor)
-	dimStyle   = lipgloss.NewStyle().Faint(true)
-	boldStyle  = lipgloss.NewStyle().Bold(true).Foreground(brightColor)
-	mutedStyle = lipgloss.NewStyle().Foreground(mutedColor)
+	titleStyle lipgloss.Style
+	dimStyle   lipgloss.Style
+	boldStyle  lipgloss.Style
+	mutedStyle lipgloss.Style
 
-	// Chart colors.
-	chartGradient = []lipgloss.Color{
-		lipgloss.Color("63"),
-		lipgloss.Color("33"),
-		lipgloss.Color("39"),
-		lipgloss.Color("49"),
-		lipgloss.Color("82"),
-		lipgloss.Color("154"),
-	}
+	chartGradient []lipgloss.Color
 	chartPadding = 10
 
 	// Braille area chart: fill patterns for left and right dot columns.

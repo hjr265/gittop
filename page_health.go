@@ -146,12 +146,12 @@ func (p *healthPage) View(width, height int) string {
 	b.WriteString(fmt.Sprintf("  %s  %s", dimStyle.Render("[v]iew"), strings.Join(viewParts, dimStyle.Render(" / "))))
 
 	if p.editing {
-		filterStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Bold(true)
+		filterStyle := lipgloss.NewStyle().Foreground(tagColor).Bold(true)
 		b.WriteString(dimStyle.Render("    [f]ilter: "))
 		b.WriteString(filterStyle.Render(p.pathInput))
 		b.WriteString(filterStyle.Render("_"))
 	} else if p.pathPattern != "" {
-		filterStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Bold(true)
+		filterStyle := lipgloss.NewStyle().Foreground(tagColor).Bold(true)
 		b.WriteString(dimStyle.Render("    [f]ilter: "))
 		b.WriteString(filterStyle.Render(p.pathPattern))
 	}
@@ -328,24 +328,18 @@ func (p *healthPage) renderFileList(files []FileHealthInfo, width int, valueFn f
 		barMaxWidth = 5
 	}
 
-	barGradient := []lipgloss.Color{
-		lipgloss.Color("22"),
-		lipgloss.Color("28"),
-		lipgloss.Color("172"),
-		lipgloss.Color("208"),
-		lipgloss.Color("196"),
-	}
+	healthBarGradient := healthGradient
 
 	var b strings.Builder
 	for i := range files {
 		f := &files[i]
 		val := valueFn(f)
 
-		ci := val * (len(barGradient) - 1) / maxVal
-		if ci >= len(barGradient) {
-			ci = len(barGradient) - 1
+		ci := val * (len(healthBarGradient) - 1) / maxVal
+		if ci >= len(healthBarGradient) {
+			ci = len(healthBarGradient) - 1
 		}
-		barStyle := lipgloss.NewStyle().Foreground(barGradient[ci])
+		barStyle := lipgloss.NewStyle().Foreground(healthBarGradient[ci])
 
 		path := f.Path
 		if len(path) > pathWidth {
@@ -439,12 +433,9 @@ func (p *healthPage) renderLanguages(width, height int) string {
 		extWidth = 6
 	}
 
-	barGradient := []lipgloss.Color{
-		lipgloss.Color("63"),
-		lipgloss.Color("33"),
-		lipgloss.Color("39"),
-		lipgloss.Color("49"),
-		lipgloss.Color("82"),
+	langGradient := chartGradient
+	if len(langGradient) > 5 {
+		langGradient = langGradient[:5]
 	}
 
 	// "  ext  ███ 12345 lines  45 files  12.3%"
@@ -455,11 +446,11 @@ func (p *healthPage) renderLanguages(width, height int) string {
 
 	var b strings.Builder
 	for _, l := range langs {
-		ci := l.lines * (len(barGradient) - 1) / maxLines
-		if ci >= len(barGradient) {
-			ci = len(barGradient) - 1
+		ci := l.lines * (len(langGradient) - 1) / maxLines
+		if ci >= len(langGradient) {
+			ci = len(langGradient) - 1
 		}
-		barStyle := lipgloss.NewStyle().Foreground(barGradient[ci])
+		barStyle := lipgloss.NewStyle().Foreground(langGradient[ci])
 
 		pct := float64(l.lines) * 100 / float64(totalLines)
 

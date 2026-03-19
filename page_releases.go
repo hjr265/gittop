@@ -137,9 +137,9 @@ func (p *releasesPage) renderTimeline(width, height int) string {
 	dateWidth := 12 // "Jan 02, 2006"
 	now := time.Now()
 
-	tagStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Bold(true)
-	currentStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("82")).Bold(true)
-	commitStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("63"))
+	tagStyleLocal := lipgloss.NewStyle().Foreground(tagColor).Bold(true)
+	currentStyle := lipgloss.NewStyle().Foreground(positiveColor).Bold(true)
+	commitStyle := lipgloss.NewStyle().Foreground(infoColor)
 
 	var b strings.Builder
 	for i, t := range visible {
@@ -151,7 +151,7 @@ func (p *releasesPage) renderTimeline(width, height int) string {
 		}
 
 		// Marker for latest.
-		style := tagStyle
+		style := tagStyleLocal
 		marker := "  "
 		if globalIdx == 0 {
 			style = currentStyle
@@ -269,15 +269,9 @@ func (p *releasesPage) renderGapList(gaps []releaseGap, width, height int) strin
 		barMaxWidth = 5
 	}
 
-	barGradient := []lipgloss.Color{
-		lipgloss.Color("82"),
-		lipgloss.Color("154"),
-		lipgloss.Color("214"),
-		lipgloss.Color("208"),
-		lipgloss.Color("196"),
-	}
+	gapGradient := cadenceGradient
 
-	arrowStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
+	arrowStyle := lipgloss.NewStyle().Foreground(mutedColor)
 
 	var b strings.Builder
 	for _, g := range gaps {
@@ -297,11 +291,11 @@ func (p *releasesPage) renderGapList(gaps []releaseGap, width, height int) strin
 			visualLabel = from + " → " + g.to
 		}
 
-		ci := g.days * (len(barGradient) - 1) / maxDays
-		if ci >= len(barGradient) {
-			ci = len(barGradient) - 1
+		ci := g.days * (len(gapGradient) - 1) / maxDays
+		if ci >= len(gapGradient) {
+			ci = len(gapGradient) - 1
 		}
-		barStyle := lipgloss.NewStyle().Foreground(barGradient[ci])
+		barStyle := lipgloss.NewStyle().Foreground(gapGradient[ci])
 
 		pad := labelWidth - len(visualLabel)
 		if pad < 0 {
@@ -383,21 +377,18 @@ func (p *releasesPage) renderGapDistribution(gaps []releaseGap, width, height in
 		barMaxWidth = 10
 	}
 
-	barGradient := []lipgloss.Color{
-		lipgloss.Color("63"),
-		lipgloss.Color("33"),
-		lipgloss.Color("39"),
-		lipgloss.Color("82"),
-		lipgloss.Color("154"),
+	distGradient := chartGradient
+	if len(distGradient) > 5 {
+		distGradient = distGradient[:5]
 	}
 
 	var b strings.Builder
 	for _, bk := range buckets {
-		ci := bk.count * (len(barGradient) - 1) / maxCount
-		if ci >= len(barGradient) {
-			ci = len(barGradient) - 1
+		ci := bk.count * (len(distGradient) - 1) / maxCount
+		if ci >= len(distGradient) {
+			ci = len(distGradient) - 1
 		}
-		barStyle := lipgloss.NewStyle().Foreground(barGradient[ci])
+		barStyle := lipgloss.NewStyle().Foreground(distGradient[ci])
 
 		b.WriteString(fmt.Sprintf("  %*s ", labelWidth, bk.label))
 		bar, barW := smoothBar(bk.count, maxCount, barMaxWidth, barStyle)

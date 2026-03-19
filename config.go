@@ -4,18 +4,22 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/BurntSushi/toml"
 )
 
 // Config holds user preferences persisted across sessions.
 type Config struct {
+	ThemeName   string `toml:"theme"`        // "Default", "Grayscale", or "Custom"
 	Truecolor   bool   `toml:"truecolor"`    // true = 24-bit, false = 256-color
 	GraphSymbol string `toml:"graph_symbol"` // "braille" or "block"
+	CustomTheme *Theme `toml:"custom_theme,omitempty"`
 }
 
 func defaultConfig() Config {
 	return Config{
+		ThemeName:   "default",
 		GraphSymbol: "braille",
 	}
 }
@@ -73,6 +77,7 @@ func (m model) ToConfig() Config {
 		sym = "block"
 	}
 	return Config{
+		ThemeName:   strings.ToLower(m.theme.Name),
 		Truecolor:   m.truecolor,
 		GraphSymbol: sym,
 	}

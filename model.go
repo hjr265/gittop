@@ -66,6 +66,7 @@ type model struct {
 	// Options menu.
 	optionsOpen   bool
 	optionsCursor int
+	theme         Theme
 	truecolor     bool
 	graphSymbol   GraphSymbol
 }
@@ -107,6 +108,8 @@ func newModel(repo *git.Repository, path string) model {
 	ti.Width = 80
 
 	cfg := LoadConfig()
+	theme := ResolveTheme(cfg)
+	ApplyTheme(theme)
 	if cfg.Truecolor {
 		lipgloss.SetColorProfile(termenv.TrueColor)
 	} else {
@@ -119,6 +122,7 @@ func newModel(repo *git.Repository, path string) model {
 		activeTab:   TabSummary,
 		rangeIdx:    defaultRangeIdx,
 		filterInput: ti,
+		theme:       theme,
 		truecolor:   cfg.Truecolor,
 		graphSymbol: cfg.GraphSymbolValue(),
 	}
@@ -406,6 +410,23 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.optionsCursor++
 				}
 			case "left", "right", "h", "l", "enter":
+				if m.optionsCursor == 0 {
+					// Cycle through available themes.
+					names := availableThemeNames(m)
+					current := -1
+					for i, n := range names {
+						if n == m.theme.Name {
+							current = i
+							break
+						}
+					}
+					next := (current + 1) % len(names)
+					cfg := m.ToConfig()
+					cfg.ThemeName = names[next]
+					m.theme = ResolveTheme(cfg)
+					ApplyTheme(m.theme)
+					_ = SaveConfig(m.ToConfig())
+				}
 				if m.optionsCursor == 1 {
 					m.truecolor = !m.truecolor
 					if m.truecolor {
@@ -675,17 +696,17 @@ func (m model) View() string {
 
 func (m model) viewTopBar() string {
 	topBarStyle := lipgloss.NewStyle().
-		Background(lipgloss.Color("236")).
-		Foreground(lipgloss.Color("255")).
+		Background(chromeBg).
+		Foreground(brightColor).
 		Bold(true)
 
 	branchStyle := lipgloss.NewStyle().
-		Background(lipgloss.Color("236")).
-		Foreground(lipgloss.Color("205"))
+		Background(chromeBg).
+		Foreground(accentColor)
 
 	dimOnBar := lipgloss.NewStyle().
-		Background(lipgloss.Color("236")).
-		Foreground(lipgloss.Color("245"))
+		Background(chromeBg).
+		Foreground(mutedColor)
 
 	left := topBarStyle.Render(" gittop") +
 		dimOnBar.Render(": ") +
@@ -694,8 +715,8 @@ func (m model) viewTopBar() string {
 		branchStyle.Render(m.branch)
 	if m.shallow {
 		shallowStyle := lipgloss.NewStyle().
-			Background(lipgloss.Color("236")).
-			Foreground(lipgloss.Color("208"))
+			Background(chromeBg).
+			Foreground(warningColor)
 		left += dimOnBar.Render(" ") + shallowStyle.Render("(shallow)")
 	}
 
@@ -703,8 +724,8 @@ func (m model) viewTopBar() string {
 	filterIndicator := ""
 	if m.filterQuery != "" {
 		filterStyle := lipgloss.NewStyle().
-			Background(lipgloss.Color("236")).
-			Foreground(lipgloss.Color("214")).
+			Background(chromeBg).
+			Foreground(tagColor).
 			Bold(true)
 		filterIndicator = dimOnBar.Render("  ") + filterStyle.Render("filter: "+m.filterQuery)
 	}
@@ -714,8 +735,8 @@ func (m model) viewTopBar() string {
 
 	// Range indicator.
 	rangeStyle := lipgloss.NewStyle().
-		Background(lipgloss.Color("236")).
-		Foreground(lipgloss.Color("82")).
+		Background(chromeBg).
+		Foreground(positiveColor).
 		Bold(true)
 	rangeIndicator := dimOnBar.Render("  ") + rangeStyle.Render(rangePresets[m.rangeIdx].label)
 
@@ -723,7 +744,7 @@ func (m model) viewTopBar() string {
 	if gap < 0 {
 		gap = 0
 	}
-	filler := lipgloss.NewStyle().Background(lipgloss.Color("236")).Render(strings.Repeat(" ", gap))
+	filler := lipgloss.NewStyle().Background(chromeBg).Render(strings.Repeat(" ", gap))
 
 	return left + filterIndicator + filler + rangeIndicator + dimOnBar.Render(" ")
 }
@@ -735,16 +756,16 @@ func (m model) viewTabBar() string {
 		key := fmt.Sprintf("%d", i+1)
 		if i == m.activeTab {
 			tab := lipgloss.NewStyle().
-				Background(lipgloss.Color("63")).
-				Foreground(lipgloss.Color("255")).
+				Background(tabActiveBg).
+				Foreground(tabActiveFg).
 				Bold(true).
 				Padding(0, 1).
 				Render(fmt.Sprintf("[%s] %s", key, name))
 			parts = append(parts, tab)
 		} else {
 			tab := lipgloss.NewStyle().
-				Background(lipgloss.Color("235")).
-				Foreground(lipgloss.Color("245")).
+				Background(tabInactiveBg).
+				Foreground(mutedColor).
 				Padding(0, 1).
 				Render(fmt.Sprintf(" %s  %s", key, name))
 			parts = append(parts, tab)
@@ -757,26 +778,26 @@ func (m model) viewTabBar() string {
 	if gap < 0 {
 		gap = 0
 	}
-	filler := lipgloss.NewStyle().Background(lipgloss.Color("235")).Render(strings.Repeat(" ", gap))
+	filler := lipgloss.NewStyle().Background(tabInactiveBg).Render(strings.Repeat(" ", gap))
 
 	return tabContent + filler
 }
 
 func (m model) viewBottomBar() string {
 	barStyle := lipgloss.NewStyle().
-		Background(lipgloss.Color("236")).
-		Foreground(lipgloss.Color("245"))
+		Background(chromeBg).
+		Foreground(mutedColor)
 
 	keyStyle := lipgloss.NewStyle().
-		Background(lipgloss.Color("236")).
-		Foreground(lipgloss.Color("255")).
+		Background(chromeBg).
+		Foreground(brightColor).
 		Bold(true)
 
 	// Filter input mode.
 	if m.filterActive {
 		promptStyle := lipgloss.NewStyle().
-			Background(lipgloss.Color("236")).
-			Foreground(lipgloss.Color("214")).
+			Background(chromeBg).
+			Foreground(tagColor).
 			Bold(true)
 
 		inputView := m.filterInput.View()
@@ -875,8 +896,8 @@ func (m model) viewBottomBar() string {
 	// Show filter error if any.
 	if m.filterErr != nil {
 		errStyle := lipgloss.NewStyle().
-			Background(lipgloss.Color("236")).
-			Foreground(lipgloss.Color("196")).
+			Background(chromeBg).
+			Foreground(errorColor).
 			Bold(true)
 		content += errStyle.Render("  " + m.filterErr.Error())
 	}
@@ -904,7 +925,7 @@ func (m model) viewOptions(width, height int) string {
 		graphSymbolName = "Block"
 	}
 	options := []option{
-		{"Color theme", "Default"},
+		{"Color theme", m.theme.Name},
 		{"Truecolor", truecolorName},
 		{"Graph symbol", graphSymbolName},
 	}
@@ -913,38 +934,38 @@ func (m model) viewOptions(width, height int) string {
 
 	borderStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("63")).
-		Background(lipgloss.Color("235"))
+		BorderForeground(modalBorder).
+		Background(modalBg)
 
-	titleStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("205")).
+	optTitleStyle := lipgloss.NewStyle().
+		Foreground(accentColor).
 		Bold(true).
-		Background(lipgloss.Color("235")).
+		Background(modalBg).
 		Width(innerWidth)
 
 	normalLabel := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("245")).
-		Background(lipgloss.Color("235"))
+		Foreground(mutedColor).
+		Background(modalBg)
 
 	normalValue := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("255")).
-		Background(lipgloss.Color("235"))
+		Foreground(brightColor).
+		Background(modalBg)
 
 	selectedStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("255")).
+		Foreground(brightColor).
 		Bold(true).
-		Background(lipgloss.Color("63"))
+		Background(tabActiveBg)
 
 	hintStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("241")).
-		Background(lipgloss.Color("235")).
+		Foreground(dimColor).
+		Background(modalBg).
 		Width(innerWidth)
 
 	bgStyle := lipgloss.NewStyle().
-		Background(lipgloss.Color("235"))
+		Background(modalBg)
 
 	var rows []string
-	rows = append(rows, titleStyle.Render(" Options"))
+	rows = append(rows, optTitleStyle.Render(" Options"))
 	rows = append(rows, bgStyle.Render(strings.Repeat(" ", innerWidth)))
 
 	for i, opt := range options {

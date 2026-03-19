@@ -126,12 +126,9 @@ func (p *activityPage) renderDistribution(width, height int, title string, bucke
 	}
 
 	// Gradient colors for the bars.
-	barGradient := []lipgloss.Color{
-		lipgloss.Color("63"),
-		lipgloss.Color("33"),
-		lipgloss.Color("39"),
-		lipgloss.Color("49"),
-		lipgloss.Color("82"),
+	distGradient := chartGradient
+	if len(distGradient) > 5 {
+		distGradient = distGradient[:5]
 	}
 
 	var b strings.Builder
@@ -141,11 +138,11 @@ func (p *activityPage) renderDistribution(width, height int, title string, bucke
 		count := counts[i]
 
 		// Pick color based on intensity.
-		ci := count * (len(barGradient) - 1) / maxCount
-		if ci >= len(barGradient) {
-			ci = len(barGradient) - 1
+		ci := count * (len(distGradient) - 1) / maxCount
+		if ci >= len(distGradient) {
+			ci = len(distGradient) - 1
 		}
-		barStyle := lipgloss.NewStyle().Foreground(barGradient[ci])
+		barStyle := lipgloss.NewStyle().Foreground(distGradient[ci])
 
 		// Percentage.
 		pct := float64(count) * 100 / float64(total)
@@ -221,13 +218,10 @@ func (p *activityPage) renderHeatmap(width, height int) string {
 		}
 	}
 
-	emptyStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("236"))
-	levels := []lipgloss.Style{
-		lipgloss.NewStyle().Foreground(lipgloss.Color("236")),
-		lipgloss.NewStyle().Foreground(lipgloss.Color("22")),
-		lipgloss.NewStyle().Foreground(lipgloss.Color("28")),
-		lipgloss.NewStyle().Foreground(lipgloss.Color("34")),
-		lipgloss.NewStyle().Foreground(lipgloss.Color("46")),
+	emptyStyle := lipgloss.NewStyle().Foreground(heatmapLevels[0])
+	levels := make([]lipgloss.Style, len(heatmapLevels))
+	for i, c := range heatmapLevels {
+		levels[i] = lipgloss.NewStyle().Foreground(c)
 	}
 
 	cellBlock := "██"

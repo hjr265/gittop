@@ -137,12 +137,12 @@ func (p *summaryPage) View(width, height int) string {
 
 	cardStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("63")).
+		BorderForeground(infoColor).
 		Width(innerWidth).
 		Padding(0, 1)
 
-	cardValueStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("82"))
-	cardLabelStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
+	cardValueStyle := lipgloss.NewStyle().Bold(true).Foreground(positiveColor)
+	cardLabelStyle := lipgloss.NewStyle().Foreground(mutedColor)
 
 	var cardViews []string
 	for _, c := range cards {

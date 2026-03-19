@@ -263,7 +263,7 @@ func (p *contributorsPage) View(width, height int) string {
 	rightPanel := p.renderRightPanel(rightWidth, contentHeight)
 
 	// Join panels with a vertical separator.
-	sepStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("237"))
+	sepStyle := lipgloss.NewStyle().Foreground(selectionBg)
 	separator := strings.Repeat(sepStyle.Render("│")+"\n", contentHeight)
 
 	leftStyled := lipgloss.NewStyle().Width(leftWidth).Height(contentHeight).Render(leftPanel)
@@ -345,15 +345,9 @@ func (p *contributorsPage) renderLeftPanel(width, height int) string {
 		barMaxWidth = 3
 	}
 
-	barGradient := []lipgloss.Color{
-		lipgloss.Color("22"),
-		lipgloss.Color("28"),
-		lipgloss.Color("34"),
-		lipgloss.Color("82"),
-		lipgloss.Color("154"),
-	}
+	contribBarGradient := barGradient
 
-	selectedStyle := lipgloss.NewStyle().Background(lipgloss.Color("237"))
+	selectedStyle := lipgloss.NewStyle().Background(selectionBg)
 
 	for i := p.offset; i < end; i++ {
 		a := &p.authors[i]
@@ -362,11 +356,11 @@ func (p *contributorsPage) renderLeftPanel(width, height int) string {
 			name = name[:nameWidth-1] + "…"
 		}
 
-		ci := a.Commits * (len(barGradient) - 1) / maxCommits
-		if ci >= len(barGradient) {
-			ci = len(barGradient) - 1
+		ci := a.Commits * (len(contribBarGradient) - 1) / maxCommits
+		if ci >= len(contribBarGradient) {
+			ci = len(contribBarGradient) - 1
 		}
-		barStyle := lipgloss.NewStyle().Foreground(barGradient[ci])
+		barStyle := lipgloss.NewStyle().Foreground(contribBarGradient[ci])
 
 		marker := " "
 		if i == p.cursor {
@@ -473,9 +467,9 @@ func (p *contributorsPage) renderActivityLinePanel(width, height int) string {
 		lineWidth = 5
 	}
 
-	selectedStyle := lipgloss.NewStyle().Background(lipgloss.Color("237"))
-	activeColor := lipgloss.NewStyle().Foreground(lipgloss.Color("82"))
-	dormantColor := lipgloss.NewStyle().Foreground(lipgloss.Color("196"))
+	selectedStyle := lipgloss.NewStyle().Background(selectionBg)
+	activeColor := lipgloss.NewStyle().Foreground(activeLineColor)
+	dormantColor := lipgloss.NewStyle().Foreground(dormantLineColor)
 
 
 	const dormantThreshold = 90 * 24 * time.Hour
@@ -589,18 +583,18 @@ func (p *contributorsPage) renderRightPanel(width, height int) string {
 	b.WriteString("\n")
 
 	// Header: name + rank.
-	nameStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("255"))
-	rankStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
+	nameStyle := lipgloss.NewStyle().Bold(true).Foreground(brightColor)
+	rankStyle := lipgloss.NewStyle().Foreground(mutedColor)
 	b.WriteString(fmt.Sprintf(" %s  %s\n", nameStyle.Render(a.Name), rankStyle.Render(fmt.Sprintf("#%d", p.cursor+1))))
 
-	statStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("82"))
+	statStyle := lipgloss.NewStyle().Foreground(positiveColor)
 	b.WriteString(fmt.Sprintf(" %s commits · %s active days\n",
 		statStyle.Render(fmt.Sprintf("%d", a.Commits)),
 		statStyle.Render(fmt.Sprintf("%d", a.ActiveDays))))
 	b.WriteString("\n")
 
 	// Activity span.
-	sectionStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("63")).Bold(true)
+	sectionStyle := lipgloss.NewStyle().Foreground(infoColor).Bold(true)
 	b.WriteString(fmt.Sprintf(" %s\n", sectionStyle.Render("Activity")))
 
 	spanDays := int(a.LastCommit.Sub(a.FirstCommit).Hours() / 24)
@@ -611,7 +605,7 @@ func (p *contributorsPage) renderRightPanel(width, height int) string {
 
 	daysSinceLast := int(now.Sub(a.LastCommit).Hours() / 24)
 	if daysSinceLast > 90 {
-		dormantStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("196"))
+		dormantStyle := lipgloss.NewStyle().Foreground(errorColor)
 		b.WriteString("  ")
 		b.WriteString(dormantStyle.Render("dormant"))
 	}
@@ -622,18 +616,18 @@ func (p *contributorsPage) renderRightPanel(width, height int) string {
 	if a.TotalWeeks <= 1 {
 		consistency = 100
 	}
-	var cadenceColor string
+	var cadenceClr lipgloss.Color
 	switch {
 	case consistency >= 75:
-		cadenceColor = "82"
+		cadenceClr = positiveColor
 	case consistency >= 50:
-		cadenceColor = "214"
+		cadenceClr = tagColor
 	case consistency >= 25:
-		cadenceColor = "208"
+		cadenceClr = warningColor
 	default:
-		cadenceColor = "196"
+		cadenceClr = errorColor
 	}
-	cadenceStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(cadenceColor))
+	cadenceStyle := lipgloss.NewStyle().Foreground(cadenceClr)
 	b.WriteString(fmt.Sprintf(" Cadence: %s consistency (%d/%d weeks)\n",
 		cadenceStyle.Render(fmt.Sprintf("%.0f%%", consistency)),
 		a.ActiveWeeks, a.TotalWeeks))
@@ -688,7 +682,7 @@ func (p *contributorsPage) renderRightPanel(width, height int) string {
 			barWidth = 5
 		}
 
-		dayStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("82"))
+		dayStyle := lipgloss.NewStyle().Foreground(positiveColor)
 		for d := 1; d <= 7; d++ {
 			idx := d % 7 // Mon=1 → idx 1, Sun=0 → idx 0
 			count := a.WeekdayDist[idx]
@@ -741,7 +735,7 @@ func (p *contributorsPage) renderRightPanel(width, height int) string {
 			pathWidth = 10
 		}
 
-		fileStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("214"))
+		fileStyle := lipgloss.NewStyle().Foreground(tagColor)
 		for i := 0; i < maxShow; i++ {
 			f := a.TopFiles[i]
 			path := f.Path
@@ -802,7 +796,7 @@ func renderMiniChart(values []int, width, height int, symbol GraphSymbol) string
 	if symbol == GraphBraille {
 		charCols = (len(data) + 1) / 2
 	}
-	chartStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("82"))
+	chartStyle := lipgloss.NewStyle().Foreground(miniChartColor)
 
 	var b strings.Builder
 	for r := 0; r < height; r++ {
