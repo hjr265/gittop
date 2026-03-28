@@ -202,7 +202,6 @@ func ApplyTheme(t Theme) {
 	mutedColor = lipgloss.Color(t.Text.Muted)
 	zeroColor = lipgloss.Color(t.Text.Zero)
 
-	titleStyle = lipgloss.NewStyle().Bold(true).Foreground(accentColor)
 	dimStyle = lipgloss.NewStyle().Faint(true)
 	boldStyle = lipgloss.NewStyle().Bold(true).Foreground(brightColor)
 	mutedStyle = lipgloss.NewStyle().Foreground(mutedColor)

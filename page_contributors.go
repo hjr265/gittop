@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"math"
 	"sort"
 	"strings"
 	"time"
@@ -839,14 +838,4 @@ func renderMiniChart(values []int, width, height int, symbol GraphSymbol) string
 	}
 
 	return b.String()
-}
-
-func formatPct(pct float64) string {
-	if pct >= 10 {
-		return fmt.Sprintf("%.0f", pct)
-	}
-	if pct >= 1 {
-		return fmt.Sprintf("%.1f", pct)
-	}
-	return fmt.Sprintf("%.1f", math.Max(pct, 0.1))
 }

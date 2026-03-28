@@ -49,8 +49,7 @@ var (
 	brightColor lipgloss.Color
 	mutedColor  lipgloss.Color
 
-	titleStyle lipgloss.Style
-	dimStyle   lipgloss.Style
+	dimStyle lipgloss.Style
 	boldStyle  lipgloss.Style
 	mutedStyle lipgloss.Style
 
