@@ -177,17 +177,29 @@ func TestCommitsToDailyStats(t *testing.T) {
 			{Date: date(2025, 6, 18)},
 		}
 		got := CommitsToDailyStats(commits)
-		// Should have at least 4 days: 15, 16, 17, 18
 		if len(got) < 4 {
 			t.Fatalf("expected at least 4 stats, got %d", len(got))
 		}
-		// Check the gap days have zero counts.
+		byDate := map[time.Time]int{}
 		for _, s := range got {
-			if s.Date.Equal(date(2025, 6, 16)) || s.Date.Equal(date(2025, 6, 17)) {
-				if s.Count != 0 {
-					t.Errorf("gap day %v count = %d, want 0", s.Date, s.Count)
-				}
+			byDate[s.Date] = s.Count
+		}
+		for _, d := range []time.Time{date(2025, 6, 15), date(2025, 6, 16), date(2025, 6, 17), date(2025, 6, 18)} {
+			if _, ok := byDate[d]; !ok {
+				t.Errorf("expected date %v in output, not found", d)
 			}
+		}
+		if byDate[date(2025, 6, 15)] != 1 {
+			t.Errorf("2025-06-15 count = %d, want 1", byDate[date(2025, 6, 15)])
+		}
+		if byDate[date(2025, 6, 16)] != 0 {
+			t.Errorf("2025-06-16 count = %d, want 0", byDate[date(2025, 6, 16)])
+		}
+		if byDate[date(2025, 6, 17)] != 0 {
+			t.Errorf("2025-06-17 count = %d, want 0", byDate[date(2025, 6, 17)])
+		}
+		if byDate[date(2025, 6, 18)] != 1 {
+			t.Errorf("2025-06-18 count = %d, want 1", byDate[date(2025, 6, 18)])
 		}
 	})
 
