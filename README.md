@@ -13,7 +13,7 @@ Prototyped rapidly with an agentic coding tool. Read the [blog post](https://hjr
 ### Arch Linux (AUR)
 
 ``` sh
-yay -S gittop
+yay -S gittop-tui-bin
 ```
 
 ### Homebrew
