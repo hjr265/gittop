@@ -27,7 +27,7 @@
           vendorHash = "sha256-vvpMEu8/OOAADfWZTbJmq5osAPfz36ZfHzjXro6oNg0=";
 
           postPatch = ''
-            substituteInPlace go.mod --replace-fail 'go 1.26.1' 'go 1.25'
+            substituteInPlace go.mod --replace-fail 'go 1.27.0' 'go 1.25'
           '';
 
           ldflags = [ "-s" "-w" ];
