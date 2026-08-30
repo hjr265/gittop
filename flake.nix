@@ -24,10 +24,10 @@
 
           # Run `nix build` with this set to lib.fakeHash to get the real hash,
           # then replace it here.
-          vendorHash = "sha256-vvpMEu8/OOAADfWZTbJmq5osAPfz36ZfHzjXro6oNg0=";
+          vendorHash = "sha256-C4x18VHDZbvzTiiV9/gMppkjENXpfQ/njIgFGl8DvSw=";
 
           postPatch = ''
-            substituteInPlace go.mod --replace-fail 'go 1.27.0' 'go 1.25'
+            substituteInPlace go.mod --replace-fail 'go 1.27.0' 'go 1.25.0'
           '';
 
           ldflags = [ "-s" "-w" ];
