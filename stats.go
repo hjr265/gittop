@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"sort"
@@ -98,7 +99,10 @@ func commitFiles(c *object.Commit) []string {
 		return files
 	}
 
-	changes, err := parentTree.Diff(tree)
+	// Rename detection is off: both sides of a rename are recorded below
+	// anyway, and detecting them means reading blob contents.
+	changes, err := object.DiffTreeWithOptions(context.Background(), parentTree, tree,
+		&object.DiffTreeOptions{DetectRenames: false})
 	if err != nil {
 		return nil
 	}

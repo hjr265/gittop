@@ -1,6 +1,7 @@
 package main
 
 import (
+	"slices"
 	"sort"
 	"testing"
 	"time"
@@ -218,6 +219,35 @@ func TestCollectTags(t *testing.T) {
 	for name, hash := range want {
 		if got[name] != hash {
 			t.Errorf("tag %q points at %q, want %q", name, got[name], hash)
+		}
+	}
+}
+
+func TestCommitFiles(t *testing.T) {
+	r := newTestRepo(t)
+	root := r.commit("Add files", map[string]string{"a.txt": "a\n", "old.txt": "some content\n"})
+	edit := r.commit("Edit a.txt", map[string]string{"a.txt": "a\na\n", "old.txt": "some content\n"}, root)
+	rename := r.commit("Rename old.txt", map[string]string{"a.txt": "a\na\n", "new.txt": "some content\n"}, edit)
+
+	tests := []struct {
+		hash plumbing.Hash
+		want []string
+	}{
+		// Root commit lists every file.
+		{root, []string{"a.txt", "old.txt"}},
+		{edit, []string{"a.txt"}},
+		// A rename shows up as both the old and the new path.
+		{rename, []string{"new.txt", "old.txt"}},
+	}
+	for _, tt := range tests {
+		c, err := r.repo.CommitObject(tt.hash)
+		if err != nil {
+			t.Fatalf("CommitObject(%s) error: %v", tt.hash, err)
+		}
+		got := commitFiles(c)
+		sort.Strings(got)
+		if !slices.Equal(got, tt.want) {
+			t.Errorf("commitFiles(%q) = %v, want %v", c.Message, got, tt.want)
 		}
 	}
 }
