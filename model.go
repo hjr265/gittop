@@ -154,11 +154,18 @@ func newModel(repo *git.Repository, path string) model {
 }
 
 func (m model) Init() tea.Cmd {
+	return loadCommits(m.repo)
+}
+
+// loadCommits returns a command that scans the repository: the mailmap, the
+// commits reachable from HEAD, the current branch, and whether the clone is
+// shallow. It reports them in a commitsMsg.
+func loadCommits(repo *git.Repository) tea.Cmd {
 	return func() tea.Msg {
-		mm := LoadMailmap(m.repo)
-		commits, err := CollectCommits(m.repo, mm)
+		mm := LoadMailmap(repo)
+		commits, err := CollectCommits(repo, mm)
 		branch := ""
-		if ref, e := m.repo.Head(); e == nil {
+		if ref, e := repo.Head(); e == nil {
 			if ref.Name().IsBranch() {
 				branch = ref.Name().Short()
 			} else {
@@ -166,7 +173,7 @@ func (m model) Init() tea.Cmd {
 			}
 		}
 		shallow := false
-		if hashes, serr := m.repo.Storer.Shallow(); serr == nil && len(hashes) > 0 {
+		if hashes, serr := repo.Storer.Shallow(); serr == nil && len(hashes) > 0 {
 			shallow = true
 		}
 		return commitsMsg{commits: commits, branch: branch, shallow: shallow, err: err, mailmap: mm}
@@ -658,24 +665,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.filtering = false
 			m.commitsSince = 0
 			m.sinceTag = ""
-			repo := m.repo
-			return m, func() tea.Msg {
-				mm := LoadMailmap(repo)
-				commits, err := CollectCommits(repo, mm)
-				branch := ""
-				if ref, e := repo.Head(); e == nil {
-					if ref.Name().IsBranch() {
-						branch = ref.Name().Short()
-					} else {
-						branch = ref.Hash().String()[:8]
-					}
-				}
-				shallow := false
-				if hashes, serr := repo.Storer.Shallow(); serr == nil && len(hashes) > 0 {
-					shallow = true
-				}
-				return commitsMsg{commits: commits, branch: branch, shallow: shallow, err: err, mailmap: mm}
-			}
+			return m, loadCommits(m.repo)
 		case "o":
 			m.optionsOpen = true
 			m.optionsCursor = 0
