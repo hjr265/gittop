@@ -80,7 +80,9 @@ When no path is given, GitTop also respects the `GIT_DIR` and `GIT_WORK_TREE` en
 | `f` | File path filter (Files tab) |
 | `s` / `S` | Sort column / toggle order (Branches); search (Commits) |
 | `j` / `k` | Scroll down / up |
-| `g` / `G` | Jump to top / bottom |
+| `PgDn` / `PgUp` | Scroll down / up one page |
+| `Ctrl+D` / `Ctrl+U` | Scroll down / up half a page |
+| `g` / `G` or `Home` / `End` | Jump to top / bottom |
 | `Enter` | Open commit diff (Commits) |
 | `o` | Open options menu (color theme, truecolor, graph symbol) |
 | `q` | Quit |

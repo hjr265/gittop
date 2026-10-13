@@ -25,6 +25,7 @@ type releasesPage struct {
 	commitsSince int
 	view         releasesView
 	offset       int
+	rows         int // visible rows at last render
 }
 
 func newReleasesPage() *releasesPage { return &releasesPage{} }
@@ -49,9 +50,11 @@ func (p *releasesPage) Update(msg tea.Msg) (Page, tea.Cmd) {
 			if p.offset > 0 {
 				p.offset--
 			}
-		case "g":
+		case "pgup", "pgdown", "ctrl+u", "ctrl+d":
+			p.offset = max(0, min(p.offset+pageStep(msg.String(), p.rows), len(p.tags)-1))
+		case "g", "home":
 			p.offset = 0
-		case "G":
+		case "G", "end":
 			if len(p.tags) > 0 {
 				p.offset = len(p.tags) - 1
 			}
@@ -98,6 +101,7 @@ func (p *releasesPage) renderTimeline(width, height int) string {
 	if maxRows < 1 {
 		maxRows = 1
 	}
+	p.rows = maxRows
 
 	tags := p.tags
 	if p.offset >= len(tags) {

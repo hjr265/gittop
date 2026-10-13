@@ -33,6 +33,7 @@ type branchesPage struct {
 	sortCol  branchSortCol
 	sortAsc  bool
 	offset   int
+	rows     int // visible rows at last render
 	loaded   bool
 }
 
@@ -67,9 +68,11 @@ func (p *branchesPage) Update(msg tea.Msg) (Page, tea.Cmd) {
 			if p.offset > 0 {
 				p.offset--
 			}
-		case "g":
+		case "pgup", "pgdown", "ctrl+u", "ctrl+d":
+			p.offset = max(0, min(p.offset+pageStep(msg.String(), p.rows), len(p.branches)-1))
+		case "g", "home":
 			p.offset = 0
-		case "G":
+		case "G", "end":
 			if len(p.branches) > 0 {
 				p.offset = len(p.branches) - 1
 			}
@@ -162,6 +165,7 @@ func (p *branchesPage) View(width, height int) string {
 	if maxRows < 1 {
 		maxRows = 1
 	}
+	p.rows = maxRows
 	if p.offset >= len(p.branches) {
 		p.offset = len(p.branches) - 1
 	}
