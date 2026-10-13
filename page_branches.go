@@ -51,6 +51,10 @@ func (p *branchesPage) Update(msg tea.Msg) (Page, tea.Cmd) {
 			p.loaded = true
 			p.sortBranches()
 		}
+	case tea.MouseMsg:
+		if step := wheelStep(msg); step != 0 {
+			p.offset = max(0, min(p.offset+step, len(p.branches)-1))
+		}
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "s":

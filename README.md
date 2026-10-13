@@ -84,8 +84,10 @@ When no path is given, GitTop also respects the `GIT_DIR` and `GIT_WORK_TREE` en
 | `Ctrl+D` / `Ctrl+U` | Scroll down / up half a page |
 | `g` / `G` or `Home` / `End` | Jump to top / bottom |
 | `Enter` | Open commit diff (Commits) |
-| `o` | Open options menu (color theme, truecolor, graph symbol) |
+| `o` | Open options menu (color theme, truecolor, graph symbol, mouse) |
 | `q` | Quit |
+
+The mouse wheel scrolls lists and the diff view. Clicking a tab switches to it, clicking a single-key entry in the bottom bar (such as `o options`) triggers it, and options in the options menu can be clicked to change them. While mouse support is on, hold `Shift` to select text in most terminals (`Option` in some macOS terminals). Turn it off in the options menu if you prefer plain selection.
 
 ## Recommended Setup
 

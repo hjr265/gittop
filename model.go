@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
@@ -15,6 +16,10 @@ import (
 const (
 	chromeTopHeight    = 2 // top bar + tab bar
 	chromeBottomHeight = 1 // keybinding bar or filter input
+	tabBarRow          = 1 // screen row of the tab bar
+
+	optionCount       = 4  // rows in the options menu
+	optionsInnerWidth = 36 // width of the options menu inside its border
 )
 
 type model struct {
@@ -70,6 +75,7 @@ type model struct {
 	theme         Theme
 	truecolor     bool
 	graphSymbol   GraphSymbol
+	mouse       bool
 }
 
 type commitsMsg struct {
@@ -127,6 +133,7 @@ func newModel(repo *git.Repository, path string) model {
 		theme:       theme,
 		truecolor:   cfg.Truecolor,
 		graphSymbol: cfg.GraphSymbolValue(),
+		mouse:       cfg.Mouse,
 	}
 	m.pages = []Page{
 		newSummaryPage(),
@@ -398,9 +405,47 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case tea.MouseMsg:
+		if m.loading || m.err != nil || m.filterActive {
+			return m, nil
+		}
+		click := msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonLeft
+		if m.optionsOpen {
+			if !click {
+				return m, nil
+			}
+			pageHeight := max(m.height-chromeTopHeight-chromeBottomHeight, 1)
+			row, inside := optionRowAt(msg.X, msg.Y-chromeTopHeight, m.width, pageHeight)
+			if !inside {
+				m.optionsOpen = false
+				return m, nil
+			}
+			if row < 0 {
+				return m, nil
+			}
+			// Change the clicked option the same way the keyboard does.
+			m.optionsCursor = row
+			return m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		}
+		switch {
+		case wheelStep(msg) != 0:
+			updated, cmd := m.pages[m.activeTab].Update(msg)
+			m.pages[m.activeTab] = updated
+			return m, cmd
+		case click && msg.Y == tabBarRow:
+			if tab := tabAt(msg.X); tab >= 0 {
+				m.activeTab = tab
+			}
+		case click && msg.Y == m.height-1:
+			if b, ok := bindingAt(m.bottomBindings(), msg.X); ok && b.click != "" {
+				return m.Update(keyMsgFor(b.click))
+			}
+		}
+
 	case tea.KeyMsg:
 		// Options menu mode.
 		if m.optionsOpen {
+			var cmd tea.Cmd
 			switch msg.String() {
 			case "esc", "o", "q":
 				m.optionsOpen = false
@@ -409,7 +454,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.optionsCursor--
 				}
 			case "down", "j":
-				if m.optionsCursor < 2 {
+				if m.optionsCursor < optionCount-1 {
 					m.optionsCursor++
 				}
 			case "left", "right", "h", "l", "enter":
@@ -452,8 +497,17 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 					_ = SaveConfig(m.ToConfig())
 				}
+				if m.optionsCursor == 3 {
+					m.mouse = !m.mouse
+					if m.mouse {
+						cmd = tea.EnableMouseCellMotion
+					} else {
+						cmd = tea.DisableMouse
+					}
+					_ = SaveConfig(m.ToConfig())
+				}
 			}
-			return m, nil
+			return m, cmd
 		}
 
 		// Filter input mode.
@@ -753,6 +807,21 @@ func (m model) viewTopBar() string {
 	return left + filterIndicator + filler + rangeIndicator + dimOnBar.Render(" ")
 }
 
+// tabAt returns the index of the tab drawn at column x of the tab bar, or -1
+// if there is none. It must match the layout in viewTabBar.
+func tabAt(x int) int {
+	start := 0
+	for i, name := range tabNames {
+		// Label plus one cell of padding on each side.
+		w := lipgloss.Width(fmt.Sprintf("[%d] %s", i+1, name)) + 2
+		if x >= start && x < start+w {
+			return i
+		}
+		start += w
+	}
+	return -1
+}
+
 func (m model) viewTabBar() string {
 	var parts []string
 
@@ -787,6 +856,131 @@ func (m model) viewTabBar() string {
 	return tabContent + filler
 }
 
+// keyBinding is one entry in the bottom bar.
+type keyBinding struct {
+	key, desc string
+	click     string // key a mouse click sends, empty if not clickable
+}
+
+// bottomBindings returns the entries of the bottom bar, left to right.
+func (m model) bottomBindings() []keyBinding {
+	bindings := []keyBinding{
+		{"1-7", "pages", ""},
+		{"tab", "next", "tab"},
+		{"+/-", "range", ""},
+		{"/", "filter", "/"},
+		{"o", "options", "o"},
+		{"r", "refresh", "r"},
+		{"q", "quit", "q"},
+	}
+
+	if m.filterQuery != "" {
+		bindings = append(bindings, keyBinding{"esc", "clear filter", "esc"})
+	}
+
+	// While the commits page is in its diff view or search input it receives
+	// every key, so the bindings above do nothing.
+	if cp, ok := m.pages[TabCommits].(*commitsPage); ok && m.activeTab == TabCommits && (cp.showDiff || cp.searching) {
+		for i := range bindings {
+			bindings[i].click = ""
+		}
+	}
+
+	// Page-specific bindings.
+	if m.activeTab == TabSummary {
+		bindings = append(bindings,
+			keyBinding{"d/w/m/y", "granularity", ""},
+		)
+	}
+	if m.activeTab == TabBranches {
+		bindings = append(bindings,
+			keyBinding{"s/S", "sort/order", ""},
+			keyBinding{"j/k", "scroll", ""},
+		)
+	}
+	if m.activeTab == TabActivity {
+		bindings = append(bindings,
+			keyBinding{"v", "cycle view", "v"},
+		)
+	}
+	if m.activeTab == TabContributors {
+		bindings = append(bindings,
+			keyBinding{"v", "cycle view", "v"},
+			keyBinding{"j/k", "scroll", ""},
+		)
+	}
+	if m.activeTab == TabReleases {
+		bindings = append(bindings,
+			keyBinding{"v", "cycle view", "v"},
+			keyBinding{"j/k", "scroll", ""},
+		)
+	}
+	if m.activeTab == TabCommits {
+		if cp, ok := m.pages[TabCommits].(*commitsPage); ok && cp.showDiff {
+			bindings = append(bindings,
+				keyBinding{"esc", "back", "esc"},
+				keyBinding{"j/k", "scroll", ""},
+				keyBinding{"g/G", "top/bottom", ""},
+			)
+		} else if cp, ok := m.pages[TabCommits].(*commitsPage); ok && cp.searching {
+			bindings = append(bindings,
+				keyBinding{"enter", "search", "enter"},
+				keyBinding{"esc", "cancel", "esc"},
+			)
+		} else {
+			bindings = append(bindings,
+				keyBinding{"enter", "open diff", "enter"},
+				keyBinding{"s", "search", "s"},
+				keyBinding{"j/k", "scroll", ""},
+				keyBinding{"g/G", "top/bottom", ""},
+			)
+			if cp, ok := m.pages[TabCommits].(*commitsPage); ok && cp.searchQuery != "" {
+				bindings = append(bindings, keyBinding{"esc", "clear search", "esc"})
+			}
+		}
+	}
+	if m.activeTab == TabFiles {
+		bindings = append(bindings,
+			keyBinding{"v", "cycle view", "v"},
+			keyBinding{"f", "file filter", "f"},
+		)
+	}
+
+	return bindings
+}
+
+// bindingWidth is the number of columns a binding takes in the bottom bar.
+func bindingWidth(b keyBinding) int {
+	return lipgloss.Width(b.key) + lipgloss.Width(b.desc) + 2
+}
+
+// bindingAt returns the binding drawn at column x of the bottom bar. It must
+// match the layout in viewBottomBar.
+func bindingAt(bindings []keyBinding, x int) (keyBinding, bool) {
+	start := 0
+	for _, b := range bindings {
+		w := bindingWidth(b)
+		if x >= start && x < start+w {
+			return b, true
+		}
+		start += w + 2 // separator
+	}
+	return keyBinding{}, false
+}
+
+// keyMsgFor builds the key message a click on a binding stands for.
+func keyMsgFor(key string) tea.KeyMsg {
+	switch key {
+	case "tab":
+		return tea.KeyMsg{Type: tea.KeyTab}
+	case "esc":
+		return tea.KeyMsg{Type: tea.KeyEsc}
+	case "enter":
+		return tea.KeyMsg{Type: tea.KeyEnter}
+	}
+	return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(key)}
+}
+
 func (m model) viewBottomBar() string {
 	barStyle := lipgloss.NewStyle().
 		Background(chromeBg).
@@ -816,79 +1010,7 @@ func (m model) viewBottomBar() string {
 	}
 
 	// Normal bottom bar.
-	bindings := []struct{ key, desc string }{
-		{"1-7", "pages"},
-		{"tab", "next"},
-		{"+/-", "range"},
-		{"/", "filter"},
-		{"o", "options"},
-		{"r", "refresh"},
-		{"q", "quit"},
-	}
-
-	if m.filterQuery != "" {
-		bindings = append(bindings, struct{ key, desc string }{"esc", "clear filter"})
-	}
-
-	// Page-specific bindings.
-	if m.activeTab == TabSummary {
-		bindings = append(bindings,
-			struct{ key, desc string }{"d/w/m/y", "granularity"},
-		)
-	}
-	if m.activeTab == TabBranches {
-		bindings = append(bindings,
-			struct{ key, desc string }{"s/S", "sort/order"},
-			struct{ key, desc string }{"j/k", "scroll"},
-		)
-	}
-	if m.activeTab == TabActivity {
-		bindings = append(bindings,
-			struct{ key, desc string }{"v", "cycle view"},
-		)
-	}
-	if m.activeTab == TabContributors {
-		bindings = append(bindings,
-			struct{ key, desc string }{"v", "cycle view"},
-			struct{ key, desc string }{"j/k", "scroll"},
-		)
-	}
-	if m.activeTab == TabReleases {
-		bindings = append(bindings,
-			struct{ key, desc string }{"v", "cycle view"},
-			struct{ key, desc string }{"j/k", "scroll"},
-		)
-	}
-	if m.activeTab == TabCommits {
-		if cp, ok := m.pages[TabCommits].(*commitsPage); ok && cp.showDiff {
-			bindings = append(bindings,
-				struct{ key, desc string }{"esc", "back"},
-				struct{ key, desc string }{"j/k", "scroll"},
-				struct{ key, desc string }{"g/G", "top/bottom"},
-			)
-		} else if cp, ok := m.pages[TabCommits].(*commitsPage); ok && cp.searching {
-			bindings = append(bindings,
-				struct{ key, desc string }{"enter", "search"},
-				struct{ key, desc string }{"esc", "cancel"},
-			)
-		} else {
-			bindings = append(bindings,
-				struct{ key, desc string }{"enter", "open diff"},
-				struct{ key, desc string }{"s", "search"},
-				struct{ key, desc string }{"j/k", "scroll"},
-				struct{ key, desc string }{"g/G", "top/bottom"},
-			)
-			if cp, ok := m.pages[TabCommits].(*commitsPage); ok && cp.searchQuery != "" {
-				bindings = append(bindings, struct{ key, desc string }{"esc", "clear search"})
-			}
-		}
-	}
-	if m.activeTab == TabFiles {
-		bindings = append(bindings,
-			struct{ key, desc string }{"v", "cycle view"},
-			struct{ key, desc string }{"f", "file filter"},
-		)
-	}
+	bindings := m.bottomBindings()
 
 	var parts []string
 	for _, bind := range bindings {
@@ -915,6 +1037,30 @@ func (m model) viewBottomBar() string {
 	return content + filler
 }
 
+// optionRowAt reports what the options menu shows at position (x, y) of a page
+// area of the given size: whether the position is inside the menu, and the
+// index of the option row there, or -1. It must match the layout in
+// viewOptions.
+func optionRowAt(x, y, width, height int) (row int, inside bool) {
+	boxWidth := optionsInnerWidth + 2
+	boxHeight := optionCount + 6 // border, title, blank, options, blank, hint, border
+
+	// Same rounding as lipgloss.Place with lipgloss.Center.
+	gapX := max(width-boxWidth, 0)
+	gapY := max(height-boxHeight, 0)
+	left := gapX - int(math.Round(float64(gapX)*0.5))
+	top := gapY - int(math.Round(float64(gapY)*0.5))
+
+	if x < left || x >= left+boxWidth || y < top || y >= top+boxHeight {
+		return -1, false
+	}
+	row = y - top - 3 // border, title, blank
+	if row < 0 || row >= optionCount {
+		return -1, true
+	}
+	return row, true
+}
+
 func (m model) viewOptions(width, height int) string {
 	type option struct {
 		label string
@@ -928,13 +1074,18 @@ func (m model) viewOptions(width, height int) string {
 	if m.graphSymbol == GraphBlock {
 		graphSymbolName = "Block"
 	}
+	mouseName := "Off"
+	if m.mouse {
+		mouseName = "On"
+	}
 	options := []option{
 		{"Color theme", m.theme.Name},
 		{"Truecolor", truecolorName},
 		{"Graph symbol", graphSymbolName},
+		{"Mouse", mouseName},
 	}
 
-	innerWidth := 36
+	innerWidth := optionsInnerWidth
 
 	borderStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).

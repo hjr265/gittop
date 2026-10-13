@@ -39,6 +39,10 @@ func (p *releasesPage) Update(msg tea.Msg) (Page, tea.Cmd) {
 			p.tags = msg.tags
 			p.commitsSince = msg.commitsSince
 		}
+	case tea.MouseMsg:
+		if step := wheelStep(msg); step != 0 {
+			p.offset = max(0, min(p.offset+step, len(p.tags)-1))
+		}
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "v":

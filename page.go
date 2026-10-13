@@ -338,3 +338,18 @@ func pageStep(key string, rows int) int {
 	}
 	return 0
 }
+
+// wheelRows is how many rows one notch of the mouse wheel scrolls.
+const wheelRows = 3
+
+// wheelStep returns how many rows a mouse wheel event scrolls a list, or 0 if
+// msg is not a wheel event.
+func wheelStep(msg tea.MouseMsg) int {
+	switch msg.Button {
+	case tea.MouseButtonWheelDown:
+		return wheelRows
+	case tea.MouseButtonWheelUp:
+		return -wheelRows
+	}
+	return 0
+}

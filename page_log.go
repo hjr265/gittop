@@ -72,6 +72,14 @@ func (p *commitsPage) Update(msg tea.Msg) (Page, tea.Cmd) {
 		p.diffHeader = fmt.Sprintf("%s  %s  %s", msg.hash, msg.author, msg.date)
 		p.diffOffset = 0
 		p.showDiff = true
+	case tea.MouseMsg:
+		if step := wheelStep(msg); step != 0 {
+			if p.showDiff {
+				p.diffOffset = max(0, p.diffOffset+step)
+			} else {
+				p.cursor = max(0, min(p.cursor+step, p.visibleLen()-1))
+			}
+		}
 	case tea.KeyMsg:
 		if p.showDiff {
 			return p.updateDiffView(msg)

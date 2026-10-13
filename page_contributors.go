@@ -64,6 +64,10 @@ func (p *contributorsPage) Update(msg tea.Msg) (Page, tea.Cmd) {
 		p.recompute()
 	case graphSymbolMsg:
 		p.graphSymbol = msg.symbol
+	case tea.MouseMsg:
+		if step := wheelStep(msg); step != 0 {
+			p.cursor = max(0, min(p.cursor+step, len(p.authors)-1))
+		}
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "v":
