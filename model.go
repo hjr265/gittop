@@ -56,6 +56,7 @@ type model struct {
 	// Tag/release data.
 	tags        []TagInfo
 	commitsSince int // commits since latest tag (unfiltered)
+	sinceTag    string // tag commitsSince is counted from
 	tagsLoaded  bool
 	tagsLoading bool
 
@@ -92,6 +93,7 @@ type statsMsg struct {
 type tagsDataMsg struct {
 	tags          []TagInfo
 	commitsSince  int // commits since latest tag
+	sinceTag      string // tag commitsSince is counted from
 	err           error
 }
 
@@ -264,7 +266,7 @@ func (m *model) propagateTags(filteredCommits []CommitInfo) {
 		filtered = matched
 	}
 
-	msg := tagsDataMsg{tags: filtered, commitsSince: m.commitsSince}
+	msg := tagsDataMsg{tags: filtered, commitsSince: m.commitsSince, sinceTag: m.sinceTag}
 	for i, p := range m.pages {
 		updated, _ := p.Update(msg)
 		m.pages[i] = updated
@@ -335,11 +337,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			repo := m.repo
 			return m, func() tea.Msg {
 				tags, err := CollectTags(repo)
-				commitsSince := 0
-				if err == nil && len(tags) > 0 && tags[0].CommitHash != "" {
-					commitsSince = CountCommitsSince(repo, tags[0].CommitHash)
+				sinceTag, commitsSince := "", 0
+				if err == nil {
+					sinceTag, commitsSince = CommitsSinceLatestTag(repo, tags)
 				}
-				return tagsDataMsg{tags: tags, commitsSince: commitsSince, err: err}
+				return tagsDataMsg{tags: tags, commitsSince: commitsSince, sinceTag: sinceTag, err: err}
 			}
 		}
 		return m, nil
@@ -372,6 +374,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.tagsLoaded = true
 		m.tags = msg.tags
 		m.commitsSince = msg.commitsSince
+		m.sinceTag = msg.sinceTag
 		// Build filtered commits for tag filtering.
 		cutoff := m.rangeCutoff()
 		source := m.commits
@@ -561,6 +564,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.healthLoading = false
 			m.filtering = false
 			m.commitsSince = 0
+			m.sinceTag = ""
 			repo := m.repo
 			return m, func() tea.Msg {
 				mm := LoadMailmap(repo)

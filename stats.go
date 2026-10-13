@@ -550,24 +550,22 @@ func CollectTags(repo *git.Repository) ([]TagInfo, error) {
 	return tags, nil
 }
 
-// CountCommitsSince counts commits from HEAD that are after the given hash.
-func CountCommitsSince(repo *git.Repository, sinceHash string) int {
+// CommitsSinceLatestTag finds the newest tag reachable from HEAD and counts
+// the commits HEAD has on top of it. tags must be sorted newest first, as
+// CollectTags returns them. The name is empty if no tag is reachable.
+func CommitsSinceLatestTag(repo *git.Repository, tags []TagInfo) (name string, count int) {
 	ref, err := repo.Head()
 	if err != nil {
-		return 0
+		return "", 0
 	}
+	head := loadCommitGraph(repo, ref.Hash())
 
-	count := 0
-	iter, err := repo.Log(&git.LogOptions{From: ref.Hash()})
-	if err != nil {
-		return 0
-	}
-	iter.ForEach(func(c *object.Commit) error {
-		if c.Hash.String() == sinceHash {
-			return io.EOF
+	for _, t := range tags {
+		h := plumbing.NewHash(t.CommitHash)
+		if _, ok := head[h]; !ok {
+			continue
 		}
-		count++
-		return nil
-	})
-	return count
+		return t.Name, len(head) - head.countReachable([]plumbing.Hash{h})
+	}
+	return "", 0
 }

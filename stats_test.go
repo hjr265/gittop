@@ -280,3 +280,25 @@ func TestAheadBehind(t *testing.T) {
 		}
 	}
 }
+
+func TestCommitsSinceLatestTag(t *testing.T) {
+	f := newMergeFixture(t)
+
+	tags, err := CollectTags(f.repo)
+	if err != nil {
+		t.Fatalf("CollectTags error: %v", err)
+	}
+
+	// v2 is newer but not reachable from HEAD, so v1 is used. HEAD has C, D
+	// and M on top of it.
+	name, count := CommitsSinceLatestTag(f.repo, tags)
+	if name != "v1" || count != 3 {
+		t.Errorf("CommitsSinceLatestTag = %q, %d, want %q, %d", name, count, "v1", 3)
+	}
+
+	// No reachable tag at all.
+	name, count = CommitsSinceLatestTag(f.repo, tags[:1])
+	if name != "" || count != 0 {
+		t.Errorf("CommitsSinceLatestTag with only v2 = %q, %d, want %q, %d", name, count, "", 0)
+	}
+}
