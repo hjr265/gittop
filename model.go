@@ -173,6 +173,18 @@ func (m model) Init() tea.Cmd {
 	}
 }
 
+// pageCapturesKeys reports whether the active page is in a mode that takes
+// every key press: a text input, or a sub-view with its own keys.
+func (m model) pageCapturesKeys() bool {
+	switch p := m.pages[m.activeTab].(type) {
+	case *commitsPage:
+		return p.showDiff || p.searching
+	case *healthPage:
+		return p.editing
+	}
+	return false
+}
+
 // loadCommitFiles returns a command that adds file lists to the loaded
 // commits and reports them in a commitsWithFilesMsg.
 func (m model) loadCommitFiles() tea.Cmd {
@@ -557,13 +569,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
-		// Delegate to commits page when it's in diff view or search mode.
-		if m.activeTab == TabCommits {
-			if cp, ok := m.pages[TabCommits].(*commitsPage); ok && (cp.showDiff || cp.searching) {
-				updated, cmd := m.pages[TabCommits].Update(msg)
-				m.pages[TabCommits] = updated
-				return m, cmd
+		// A page in a text input or its own sub-view gets every key, so that
+		// typing does not trigger the global shortcuts below.
+		if m.pageCapturesKeys() {
+			if msg.String() == "ctrl+c" {
+				return m, tea.Quit
 			}
+			updated, cmd := m.pages[m.activeTab].Update(msg)
+			m.pages[m.activeTab] = updated
+			return m, cmd
 		}
 
 		// Normal mode.
@@ -580,6 +594,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if cp, ok := m.pages[TabCommits].(*commitsPage); ok && cp.searchQuery != "" {
 					updated, cmd := m.pages[TabCommits].Update(msg)
 					m.pages[TabCommits] = updated
+					return m, cmd
+				}
+			}
+			// On files tab with an active path filter, clear that first.
+			if m.activeTab == TabFiles {
+				if hp, ok := m.pages[TabFiles].(*healthPage); ok && hp.pathPattern != "" {
+					updated, cmd := m.pages[TabFiles].Update(msg)
+					m.pages[TabFiles] = updated
 					return m, cmd
 				}
 			}
@@ -886,9 +908,8 @@ func (m model) bottomBindings() []keyBinding {
 		bindings = append(bindings, keyBinding{"esc", "clear filter", "esc"})
 	}
 
-	// While the commits page is in its diff view or search input it receives
-	// every key, so the bindings above do nothing.
-	if cp, ok := m.pages[TabCommits].(*commitsPage); ok && m.activeTab == TabCommits && (cp.showDiff || cp.searching) {
+	// While the page takes every key, the bindings above do nothing.
+	if m.pageCapturesKeys() {
 		for i := range bindings {
 			bindings[i].click = ""
 		}
@@ -948,10 +969,21 @@ func (m model) bottomBindings() []keyBinding {
 		}
 	}
 	if m.activeTab == TabFiles {
-		bindings = append(bindings,
-			keyBinding{"v", "cycle view", "v"},
-			keyBinding{"f", "file filter", "f"},
-		)
+		hp, _ := m.pages[TabFiles].(*healthPage)
+		if hp != nil && hp.editing {
+			bindings = append(bindings,
+				keyBinding{"enter", "apply", "enter"},
+				keyBinding{"esc", "cancel", "esc"},
+			)
+		} else {
+			bindings = append(bindings,
+				keyBinding{"v", "cycle view", "v"},
+				keyBinding{"f", "file filter", "f"},
+			)
+			if hp != nil && hp.pathPattern != "" {
+				bindings = append(bindings, keyBinding{"esc", "clear file filter", "esc"})
+			}
+		}
 	}
 
 	return bindings
