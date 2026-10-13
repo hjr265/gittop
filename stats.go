@@ -74,8 +74,14 @@ func CollectCommits(repo *git.Repository, needFiles bool, mm *Mailmap) ([]Commit
 	return commits, nil
 }
 
-// commitFiles returns the list of file paths changed by a commit.
+// commitFiles returns the list of file paths changed by a commit. Merge
+// commits report no files, as in `git log --stat`: their changes belong to the
+// commits being merged.
 func commitFiles(c *object.Commit) []string {
+	if c.NumParents() > 1 {
+		return nil
+	}
+
 	tree, err := c.Tree()
 	if err != nil {
 		return nil

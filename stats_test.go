@@ -302,3 +302,25 @@ func TestCommitsSinceLatestTag(t *testing.T) {
 		t.Errorf("CommitsSinceLatestTag with only v2 = %q, %d, want %q, %d", name, count, "", 0)
 	}
 }
+
+func TestMergeCommitFiles(t *testing.T) {
+	f := newMergeFixture(t)
+
+	commits, err := CollectCommits(f.repo, true, LoadMailmap(f.repo))
+	if err != nil {
+		t.Fatalf("CollectCommits error: %v", err)
+	}
+	for _, c := range commits {
+		if c.Hash == f.m.String() && len(c.Files) != 0 {
+			t.Errorf("merge commit lists files %v, want none", c.Files)
+		}
+	}
+
+	// c.txt was added in C and reached HEAD through the merge M. Only C
+	// counts as a change to it.
+	for _, h := range BuildHealthData(map[string]int{"c.txt": 1}, commits, false) {
+		if h.Path == "c.txt" && h.Churn != 1 {
+			t.Errorf("c.txt churn = %d, want 1", h.Churn)
+		}
+	}
+}
