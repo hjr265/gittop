@@ -2,7 +2,9 @@ package main
 
 import (
 	"bytes"
+	"container/heap"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"sort"
@@ -33,22 +35,70 @@ type CommitInfo struct {
 	Files   []string // populated only when needed (path filter)
 }
 
+// commitQueue is a heap of commits ordered newest first by committer time.
+// Commits with the same time come out in the order they went in.
+type commitQueue []queuedCommit
+
+type queuedCommit struct {
+	commit *object.Commit
+	seq    int
+}
+
+func (q commitQueue) Len() int      { return len(q) }
+func (q commitQueue) Swap(i, j int) { q[i], q[j] = q[j], q[i] }
+func (q commitQueue) Less(i, j int) bool {
+	a, b := q[i].commit.Committer.When, q[j].commit.Committer.When
+	if !a.Equal(b) {
+		return a.After(b)
+	}
+	return q[i].seq < q[j].seq
+}
+func (q *commitQueue) Push(x any) { *q = append(*q, x.(queuedCommit)) }
+func (q *commitQueue) Pop() any {
+	old := *q
+	x := old[len(old)-1]
+	*q = old[:len(old)-1]
+	return x
+}
+
 // CollectCommits walks the entire commit log reachable from HEAD and
-// returns per-commit metadata. If needFiles is true, each commit's
-// changed file paths are computed (slower).
+// returns per-commit metadata, newest first by committer time, as `git log`
+// orders it. Parents that are missing, as in a shallow clone, are skipped. If
+// needFiles is true, each commit's changed file paths are computed (slower).
 func CollectCommits(repo *git.Repository, needFiles bool, mm *Mailmap) ([]CommitInfo, error) {
 	ref, err := repo.Head()
 	if err != nil {
 		return nil, err
 	}
-
-	iter, err := repo.Log(&git.LogOptions{From: ref.Hash()})
+	head, err := repo.CommitObject(ref.Hash())
 	if err != nil {
 		return nil, err
 	}
 
+	queue := &commitQueue{{commit: head}}
+	queued := map[plumbing.Hash]bool{head.Hash: true}
+	seq := 0
+
 	var commits []CommitInfo
-	err = iter.ForEach(func(c *object.Commit) error {
+	for queue.Len() > 0 {
+		c := heap.Pop(queue).(queuedCommit).commit
+
+		for _, h := range c.ParentHashes {
+			if queued[h] {
+				continue
+			}
+			queued[h] = true
+			parent, err := repo.CommitObject(h)
+			if errors.Is(err, plumbing.ErrObjectNotFound) {
+				continue
+			}
+			if err != nil {
+				return nil, err
+			}
+			seq++
+			heap.Push(queue, queuedCommit{commit: parent, seq: seq})
+		}
+
 		when := c.Author.When
 		name, email := mm.Resolve(c.Author.Name, c.Author.Email)
 		ci := CommitInfo{
@@ -65,10 +115,6 @@ func CollectCommits(repo *git.Repository, needFiles bool, mm *Mailmap) ([]Commit
 			ci.Files = commitFiles(c)
 		}
 		commits = append(commits, ci)
-		return nil
-	})
-	if err != nil && err != plumbing.ErrObjectNotFound {
-		return nil, err
 	}
 
 	return commits, nil

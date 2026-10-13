@@ -324,3 +324,48 @@ func TestMergeCommitFiles(t *testing.T) {
 		}
 	}
 }
+
+func TestCollectCommitsOrder(t *testing.T) {
+	f := newMergeFixture(t)
+
+	commits, err := CollectCommits(f.repo, false, LoadMailmap(f.repo))
+	if err != nil {
+		t.Fatalf("CollectCommits error: %v", err)
+	}
+
+	// Newest first. The default depth-first order would put C last.
+	want := []plumbing.Hash{f.m, f.d, f.c, f.b, f.a}
+	var got []string
+	for _, c := range commits {
+		got = append(got, c.Message)
+	}
+	if len(commits) != len(want) {
+		t.Fatalf("CollectCommits returned %v, want %d commits", got, len(want))
+	}
+	for i, h := range want {
+		if commits[i].Hash != h.String() {
+			t.Errorf("CollectCommits order = %v, want [M D C B A]", got)
+			break
+		}
+	}
+}
+
+func TestCollectCommitsMissingParent(t *testing.T) {
+	// As in a shallow clone: B's parent is not in the repository, and B is
+	// reached through one side of a merge.
+	r := newTestRepo(t)
+	missing := plumbing.NewHash("1111111111111111111111111111111111111111")
+	b := r.commit("B", map[string]string{"a.txt": "a\n"}, missing)
+	c := r.commit("C", map[string]string{"a.txt": "a\n", "c.txt": "c\n"}, b)
+	d := r.commit("D", map[string]string{"a.txt": "a\n", "d.txt": "d\n"}, b)
+	m := r.commit("M", map[string]string{"a.txt": "a\n", "c.txt": "c\n", "d.txt": "d\n"}, d, c)
+	r.branch("master", m)
+
+	commits, err := CollectCommits(r.repo, false, LoadMailmap(r.repo))
+	if err != nil {
+		t.Fatalf("CollectCommits error: %v", err)
+	}
+	if len(commits) != 4 {
+		t.Errorf("CollectCommits returned %d commits, want 4", len(commits))
+	}
+}
