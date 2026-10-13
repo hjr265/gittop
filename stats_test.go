@@ -1,6 +1,7 @@
 package main
 
 import (
+	"maps"
 	"slices"
 	"sort"
 	"testing"
@@ -406,5 +407,24 @@ func TestWithCommitFiles(t *testing.T) {
 		if commits[i].Files != nil {
 			t.Errorf("WithCommitFiles modified its input: %s has files %v", commits[i].Message, commits[i].Files)
 		}
+	}
+}
+
+func TestCollectFileLineCounts(t *testing.T) {
+	r := newTestRepo(t)
+	r.branch("master", r.commit("Add files", map[string]string{
+		"text.txt":       "one\ntwo\nthree\n",
+		"no-newline.txt": "one\ntwo",
+		"empty.txt":      "",
+		"image.png":      "\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR",
+	}))
+
+	got, err := CollectFileLineCounts(r.repo)
+	if err != nil {
+		t.Fatalf("CollectFileLineCounts error: %v", err)
+	}
+	want := map[string]int{"text.txt": 3, "no-newline.txt": 2, "empty.txt": 0}
+	if !maps.Equal(got, want) {
+		t.Errorf("CollectFileLineCounts = %v, want %v", got, want)
 	}
 }

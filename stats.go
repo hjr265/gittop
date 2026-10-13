@@ -305,7 +305,12 @@ type FileHealthInfo struct {
 	Churn       int // number of commits that touched this file
 }
 
+// binarySniffLen is how much of a file is checked for NUL bytes to decide
+// whether it is binary. Git uses the same limit.
+const binarySniffLen = 8000
+
 // CollectFileLineCounts walks the HEAD tree and returns line counts per file.
+// Binary files and files over 1 MB are left out.
 func CollectFileLineCounts(repo *git.Repository) (map[string]int, error) {
 	ref, err := repo.Head()
 	if err != nil {
@@ -321,7 +326,7 @@ func CollectFileLineCounts(repo *git.Repository) (map[string]int, error) {
 	}
 
 	lineCounts := map[string]int{}
-	tree.Files().ForEach(func(f *object.File) error {
+	err = tree.Files().ForEach(func(f *object.File) error {
 		if f.Size > 1<<20 { // skip files >1MB
 			return nil
 		}
@@ -334,6 +339,9 @@ func CollectFileLineCounts(repo *git.Repository) (map[string]int, error) {
 		if err != nil {
 			return nil
 		}
+		if bytes.IndexByte(content[:min(len(content), binarySniffLen)], 0) >= 0 {
+			return nil // binary
+		}
 		lines := bytes.Count(content, []byte("\n"))
 		if len(content) > 0 && content[len(content)-1] != '\n' {
 			lines++ // count last line without trailing newline
@@ -341,6 +349,9 @@ func CollectFileLineCounts(repo *git.Repository) (map[string]int, error) {
 		lineCounts[f.Name] = lines
 		return nil
 	})
+	if err != nil {
+		return nil, err
+	}
 
 	return lineCounts, nil
 }
