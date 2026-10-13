@@ -32,7 +32,7 @@ type CommitInfo struct {
 	Weekday time.Weekday
 	Month   time.Month
 	Message string
-	Files   []string // populated only when needed (path filter)
+	Files   []string // populated only by WithCommitFiles
 }
 
 // commitQueue is a heap of commits ordered newest first by committer time.
@@ -63,9 +63,9 @@ func (q *commitQueue) Pop() any {
 
 // CollectCommits walks the entire commit log reachable from HEAD and
 // returns per-commit metadata, newest first by committer time, as `git log`
-// orders it. Parents that are missing, as in a shallow clone, are skipped. If
-// needFiles is true, each commit's changed file paths are computed (slower).
-func CollectCommits(repo *git.Repository, needFiles bool, mm *Mailmap) ([]CommitInfo, error) {
+// orders it. Parents that are missing, as in a shallow clone, are skipped.
+// Files is left empty; see WithCommitFiles.
+func CollectCommits(repo *git.Repository, mm *Mailmap) ([]CommitInfo, error) {
 	ref, err := repo.Head()
 	if err != nil {
 		return nil, err
@@ -111,13 +111,26 @@ func CollectCommits(repo *git.Repository, needFiles bool, mm *Mailmap) ([]Commit
 			Month:   when.Month(),
 			Message: strings.TrimSpace(c.Message),
 		}
-		if needFiles {
-			ci.Files = commitFiles(c)
-		}
 		commits = append(commits, ci)
 	}
 
 	return commits, nil
+}
+
+// WithCommitFiles returns a copy of commits with each commit's changed file
+// paths filled in. This is much slower than collecting the commits. The input
+// is not modified.
+func WithCommitFiles(repo *git.Repository, commits []CommitInfo) ([]CommitInfo, error) {
+	result := make([]CommitInfo, len(commits))
+	copy(result, commits)
+	for i := range result {
+		c, err := repo.CommitObject(plumbing.NewHash(result[i].Hash))
+		if err != nil {
+			return nil, err
+		}
+		result[i].Files = commitFiles(c)
+	}
+	return result, nil
 }
 
 // commitFiles returns the list of file paths changed by a commit. Merge

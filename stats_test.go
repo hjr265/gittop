@@ -149,7 +149,7 @@ func newMergeFixture(t *testing.T) *mergeFixture {
 func TestCollectCommits(t *testing.T) {
 	f := newMergeFixture(t)
 
-	commits, err := CollectCommits(f.repo, false, LoadMailmap(f.repo))
+	commits, err := CollectCommits(f.repo, LoadMailmap(f.repo))
 	if err != nil {
 		t.Fatalf("CollectCommits error: %v", err)
 	}
@@ -306,9 +306,13 @@ func TestCommitsSinceLatestTag(t *testing.T) {
 func TestMergeCommitFiles(t *testing.T) {
 	f := newMergeFixture(t)
 
-	commits, err := CollectCommits(f.repo, true, LoadMailmap(f.repo))
+	commits, err := CollectCommits(f.repo, LoadMailmap(f.repo))
 	if err != nil {
 		t.Fatalf("CollectCommits error: %v", err)
+	}
+	commits, err = WithCommitFiles(f.repo, commits)
+	if err != nil {
+		t.Fatalf("WithCommitFiles error: %v", err)
 	}
 	for _, c := range commits {
 		if c.Hash == f.m.String() && len(c.Files) != 0 {
@@ -328,7 +332,7 @@ func TestMergeCommitFiles(t *testing.T) {
 func TestCollectCommitsOrder(t *testing.T) {
 	f := newMergeFixture(t)
 
-	commits, err := CollectCommits(f.repo, false, LoadMailmap(f.repo))
+	commits, err := CollectCommits(f.repo, LoadMailmap(f.repo))
 	if err != nil {
 		t.Fatalf("CollectCommits error: %v", err)
 	}
@@ -361,11 +365,46 @@ func TestCollectCommitsMissingParent(t *testing.T) {
 	m := r.commit("M", map[string]string{"a.txt": "a\n", "c.txt": "c\n", "d.txt": "d\n"}, d, c)
 	r.branch("master", m)
 
-	commits, err := CollectCommits(r.repo, false, LoadMailmap(r.repo))
+	commits, err := CollectCommits(r.repo, LoadMailmap(r.repo))
 	if err != nil {
 		t.Fatalf("CollectCommits error: %v", err)
 	}
 	if len(commits) != 4 {
 		t.Errorf("CollectCommits returned %d commits, want 4", len(commits))
+	}
+}
+
+func TestWithCommitFiles(t *testing.T) {
+	f := newMergeFixture(t)
+
+	commits, err := CollectCommits(f.repo, LoadMailmap(f.repo))
+	if err != nil {
+		t.Fatalf("CollectCommits error: %v", err)
+	}
+	withFiles, err := WithCommitFiles(f.repo, commits)
+	if err != nil {
+		t.Fatalf("WithCommitFiles error: %v", err)
+	}
+
+	want := map[string][]string{
+		"A": {"a.txt"},
+		"B": {"b.txt"},
+		"C": {"c.txt"},
+		"D": {"d.txt"},
+		"M": nil,
+	}
+	if len(withFiles) != len(commits) {
+		t.Fatalf("WithCommitFiles returned %d commits, want %d", len(withFiles), len(commits))
+	}
+	for i, c := range withFiles {
+		if c.Hash != commits[i].Hash {
+			t.Errorf("commit %d is %s, want %s", i, c.Hash, commits[i].Hash)
+		}
+		if !slices.Equal(c.Files, want[c.Message]) {
+			t.Errorf("files of %s = %v, want %v", c.Message, c.Files, want[c.Message])
+		}
+		if commits[i].Files != nil {
+			t.Errorf("WithCommitFiles modified its input: %s has files %v", commits[i].Message, commits[i].Files)
+		}
 	}
 }

@@ -156,7 +156,7 @@ func newModel(repo *git.Repository, path string) model {
 func (m model) Init() tea.Cmd {
 	return func() tea.Msg {
 		mm := LoadMailmap(m.repo)
-		commits, err := CollectCommits(m.repo, false, mm)
+		commits, err := CollectCommits(m.repo, mm)
 		branch := ""
 		if ref, e := m.repo.Head(); e == nil {
 			if ref.Name().IsBranch() {
@@ -170,6 +170,27 @@ func (m model) Init() tea.Cmd {
 			shallow = true
 		}
 		return commitsMsg{commits: commits, branch: branch, shallow: shallow, err: err, mailmap: mm}
+	}
+}
+
+// loadCommitFiles returns a command that adds file lists to the loaded
+// commits and reports them in a commitsWithFilesMsg.
+func (m model) loadCommitFiles() tea.Cmd {
+	repo, mm, commits := m.repo, m.mailmap, m.commits
+	return func() tea.Msg {
+		if commits == nil {
+			// The first scan has not finished yet, so walk the history here.
+			if mm == nil {
+				mm = LoadMailmap(repo)
+			}
+			var err error
+			commits, err = CollectCommits(repo, mm)
+			if err != nil {
+				return commitsWithFilesMsg{err: err}
+			}
+		}
+		withFiles, err := WithCommitFiles(repo, commits)
+		return commitsWithFilesMsg{commits: withFiles, err: err}
 	}
 }
 
@@ -522,11 +543,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// If filter needs files and we don't have them, trigger re-scan.
 				if m.filterExpr != nil && FilterNeedsFiles(m.filterExpr) && m.commitsWithFiles == nil && !m.filtering {
 					m.filtering = true
-					mm := m.mailmap
-					return m, func() tea.Msg {
-						commits, err := CollectCommits(m.repo, true, mm)
-						return commitsWithFilesMsg{commits: commits, err: err}
-					}
+					return m, m.loadCommitFiles()
 				}
 				return m, nil
 			case "esc":
@@ -622,7 +639,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			repo := m.repo
 			return m, func() tea.Msg {
 				mm := LoadMailmap(repo)
-				commits, err := CollectCommits(repo, false, mm)
+				commits, err := CollectCommits(repo, mm)
 				branch := ""
 				if ref, e := repo.Head(); e == nil {
 					if ref.Name().IsBranch() {
@@ -668,19 +685,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// Trigger file data loading for Contributors ownership view.
 	if m.activeTab == TabContributors && m.commitsWithFiles == nil && !m.filtering {
 		m.filtering = true
-		repo := m.repo
-		mm := m.mailmap
-		return m, func() tea.Msg {
-			commits, err := CollectCommits(repo, true, mm)
-			return commitsWithFilesMsg{commits: commits, err: err}
-		}
+		return m, m.loadCommitFiles()
 	}
 
 	// Trigger health data loading when Health tab is active.
 	if m.activeTab == TabFiles && !m.healthLoaded && !m.healthLoading {
 		m.healthLoading = true
 		repo := m.repo
-		mm := m.mailmap
 		cmds := []tea.Cmd{
 			func() tea.Msg {
 				lineCounts, err := CollectFileLineCounts(repo)
@@ -690,10 +701,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Also load commits with files if not already loaded.
 		if m.commitsWithFiles == nil && !m.filtering {
 			m.filtering = true
-			cmds = append(cmds, func() tea.Msg {
-				commits, err := CollectCommits(repo, true, mm)
-				return commitsWithFilesMsg{commits: commits, err: err}
-			})
+			cmds = append(cmds, m.loadCommitFiles())
 		}
 		return m, tea.Batch(cmds...)
 	}

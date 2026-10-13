@@ -70,7 +70,7 @@ func TestOpenRepositoryLinkedWorktree(t *testing.T) {
 	if head.Name() != feature {
 		t.Errorf("HEAD is %s, want %s", head.Name(), feature)
 	}
-	commits, err := CollectCommits(opened, false, LoadMailmap(opened))
+	commits, err := CollectCommits(opened, LoadMailmap(opened))
 	if err != nil {
 		t.Fatalf("CollectCommits error: %v", err)
 	}
