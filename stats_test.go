@@ -183,6 +183,9 @@ func TestCollectBranches(t *testing.T) {
 	current := map[string]bool{}
 	for _, b := range branches {
 		current[b.Name] = b.IsCurrent
+		if b.Name == "feature" && (b.Ahead != 1 || b.Behind != 2) {
+			t.Errorf("branch %q is %d ahead, %d behind, want 1 ahead, 2 behind", b.Name, b.Ahead, b.Behind)
+		}
 	}
 	want := map[string]bool{"master": true, "feature": false}
 	if len(current) != len(want) {
@@ -248,6 +251,32 @@ func TestCommitFiles(t *testing.T) {
 		sort.Strings(got)
 		if !slices.Equal(got, tt.want) {
 			t.Errorf("commitFiles(%q) = %v, want %v", c.Message, got, tt.want)
+		}
+	}
+}
+
+func TestAheadBehind(t *testing.T) {
+	f := newMergeFixture(t)
+	base := loadCommitGraph(f.repo, f.m)
+
+	tests := []struct {
+		name                  string
+		hash                  plumbing.Hash
+		wantAhead, wantBehind int
+	}{
+		{"M", f.m, 0, 0},
+		// E is ahead by itself and lacks D and M.
+		{"E", f.e, 1, 2},
+		// C was merged, so only D and M are missing.
+		{"C", f.c, 0, 2},
+		{"B", f.b, 0, 3},
+		{"A", f.a, 0, 4},
+	}
+	for _, tt := range tests {
+		ahead, behind := aheadBehind(f.repo, base, tt.hash)
+		if ahead != tt.wantAhead || behind != tt.wantBehind {
+			t.Errorf("aheadBehind(%s) = %d ahead, %d behind, want %d ahead, %d behind",
+				tt.name, ahead, behind, tt.wantAhead, tt.wantBehind)
 		}
 	}
 }

@@ -337,8 +337,8 @@ type BranchInfo struct {
 	IsCurrent  bool
 	LastCommit time.Time
 	Author     string
-	Ahead      int // commits ahead of default branch
-	Behind     int // commits behind default branch
+	Ahead      int // commits ahead of HEAD
+	Behind     int // commits behind HEAD
 	Stale      bool   // true if last commit is older than 90 days
 	RemoteGone bool   // true if upstream remote branch no longer exists
 	HasRemote  bool   // true if branch tracks a remote branch
@@ -350,11 +350,7 @@ func CollectBranches(repo *git.Repository, mm *Mailmap) ([]BranchInfo, error) {
 	if err != nil {
 		return nil, err
 	}
-	headCommit, err := repo.CommitObject(headRef.Hash())
-	if err != nil {
-		return nil, err
-	}
-	_ = headCommit
+	headGraph := loadCommitGraph(repo, headRef.Hash())
 
 	// Build a set of remote-tracking branch refs for quick lookup.
 	remoteRefs := map[string]bool{}
@@ -394,9 +390,7 @@ func CollectBranches(repo *git.Repository, mm *Mailmap) ([]BranchInfo, error) {
 		}
 
 		if ref.Hash() != headRef.Hash() {
-			ahead, behind := computeAheadBehind(repo, ref.Hash(), headRef.Hash())
-			bi.Ahead = ahead
-			bi.Behind = behind
+			bi.Ahead, bi.Behind = aheadBehind(repo, headGraph, ref.Hash())
 		}
 
 		// Check remote tracking status.
@@ -423,50 +417,77 @@ func CollectBranches(repo *git.Repository, mm *Mailmap) ([]BranchInfo, error) {
 	return result, nil
 }
 
-// computeAheadBehind counts commits ahead/behind between branch and base.
-func computeAheadBehind(repo *git.Repository, branchHash, baseHash plumbing.Hash) (ahead, behind int) {
-	branchCommit, err := repo.CommitObject(branchHash)
-	if err != nil {
-		return 0, 0
-	}
-	baseCommit, err := repo.CommitObject(baseHash)
-	if err != nil {
-		return 0, 0
-	}
+// commitGraph maps each commit reachable from some starting point to its
+// parents.
+type commitGraph map[plumbing.Hash][]plumbing.Hash
 
-	bases, err := branchCommit.MergeBase(baseCommit)
-	if err != nil || len(bases) == 0 {
-		return 0, 0
+// loadCommitGraph walks every commit reachable from the given hash. Commits
+// that cannot be read, such as those cut off by a shallow clone, are left out.
+func loadCommitGraph(repo *git.Repository, from plumbing.Hash) commitGraph {
+	g := commitGraph{}
+	seen := map[plumbing.Hash]bool{}
+	stack := []plumbing.Hash{from}
+	for len(stack) > 0 {
+		h := stack[len(stack)-1]
+		stack = stack[:len(stack)-1]
+		if seen[h] {
+			continue
+		}
+		seen[h] = true
+		c, err := repo.CommitObject(h)
+		if err != nil {
+			continue
+		}
+		g[h] = c.ParentHashes
+		stack = append(stack, c.ParentHashes...)
 	}
-	mergeBase := bases[0].Hash
+	return g
+}
 
-	// Count ahead: walk from branch to merge base.
-	iter, err := repo.Log(&git.LogOptions{From: branchHash})
-	if err != nil {
-		return 0, 0
+// countReachable returns how many commits in the graph are reachable from the
+// given hashes, the hashes themselves included.
+func (g commitGraph) countReachable(from []plumbing.Hash) int {
+	seen := map[plumbing.Hash]bool{}
+	stack := append([]plumbing.Hash(nil), from...)
+	for len(stack) > 0 {
+		h := stack[len(stack)-1]
+		stack = stack[:len(stack)-1]
+		parents, ok := g[h]
+		if !ok || seen[h] {
+			continue
+		}
+		seen[h] = true
+		stack = append(stack, parents...)
 	}
-	iter.ForEach(func(c *object.Commit) error {
-		if c.Hash == mergeBase {
-			return io.EOF
+	return len(seen)
+}
+
+// aheadBehind counts the commits reachable from branch but not from base
+// (ahead), and those reachable from base but not from branch (behind). Only
+// the commits base does not already have are read from the repository.
+func aheadBehind(repo *git.Repository, base commitGraph, branch plumbing.Hash) (ahead, behind int) {
+	var shared []plumbing.Hash // where the walk from branch meets base
+	seen := map[plumbing.Hash]bool{}
+	stack := []plumbing.Hash{branch}
+	for len(stack) > 0 {
+		h := stack[len(stack)-1]
+		stack = stack[:len(stack)-1]
+		if seen[h] {
+			continue
+		}
+		seen[h] = true
+		if _, ok := base[h]; ok {
+			shared = append(shared, h)
+			continue
+		}
+		c, err := repo.CommitObject(h)
+		if err != nil {
+			continue
 		}
 		ahead++
-		return nil
-	})
-
-	// Count behind: walk from base to merge base.
-	iter, err = repo.Log(&git.LogOptions{From: baseHash})
-	if err != nil {
-		return ahead, 0
+		stack = append(stack, c.ParentHashes...)
 	}
-	iter.ForEach(func(c *object.Commit) error {
-		if c.Hash == mergeBase {
-			return io.EOF
-		}
-		behind++
-		return nil
-	})
-
-	return ahead, behind
+	return ahead, len(base) - base.countReachable(shared)
 }
 
 // TagInfo holds metadata for a single tag/release.
