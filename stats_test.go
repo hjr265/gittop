@@ -450,7 +450,7 @@ func TestTruncateToDay(t *testing.T) {
 			want:  date(2025, 1, 1),
 		},
 		{
-			name:  "non-UTC timezone normalizes to UTC",
+			name:  "non-UTC timezone keeps wall-clock date",
 			input: time.Date(2025, 3, 10, 23, 59, 59, 0, time.FixedZone("EST", -5*3600)),
 			want:  date(2025, 3, 10),
 		},
@@ -596,34 +596,25 @@ func TestCommitsToDailyStats(t *testing.T) {
 	})
 
 	t.Run("fills gaps with zero-count days", func(t *testing.T) {
+		// Dates are relative to today, since the output runs up to time.Now().
+		today := truncateToDay(time.Now())
+		start := today.AddDate(0, 0, -3)
 		commits := []CommitInfo{
-			{Date: date(2025, 6, 15)},
-			{Date: date(2025, 6, 18)},
+			{Date: start},
+			{Date: today},
 		}
 		got := CommitsToDailyStats(commits)
-		if len(got) < 4 {
-			t.Fatalf("expected at least 4 stats, got %d", len(got))
+		want := []int{1, 0, 0, 1}
+		if len(got) != len(want) {
+			t.Fatalf("len = %d, want %d", len(got), len(want))
 		}
-		byDate := map[time.Time]int{}
-		for _, s := range got {
-			byDate[s.Date] = s.Count
-		}
-		for _, d := range []time.Time{date(2025, 6, 15), date(2025, 6, 16), date(2025, 6, 17), date(2025, 6, 18)} {
-			if _, ok := byDate[d]; !ok {
-				t.Errorf("expected date %v in output, not found", d)
+		for i, s := range got {
+			if d := start.AddDate(0, 0, i); !s.Date.Equal(d) {
+				t.Errorf("got[%d].Date = %v, want %v", i, s.Date, d)
 			}
-		}
-		if byDate[date(2025, 6, 15)] != 1 {
-			t.Errorf("2025-06-15 count = %d, want 1", byDate[date(2025, 6, 15)])
-		}
-		if byDate[date(2025, 6, 16)] != 0 {
-			t.Errorf("2025-06-16 count = %d, want 0", byDate[date(2025, 6, 16)])
-		}
-		if byDate[date(2025, 6, 17)] != 0 {
-			t.Errorf("2025-06-17 count = %d, want 0", byDate[date(2025, 6, 17)])
-		}
-		if byDate[date(2025, 6, 18)] != 1 {
-			t.Errorf("2025-06-18 count = %d, want 1", byDate[date(2025, 6, 18)])
+			if s.Count != want[i] {
+				t.Errorf("got[%d].Count = %d, want %d", i, s.Count, want[i])
+			}
 		}
 	})
 
@@ -633,6 +624,9 @@ func TestCommitsToDailyStats(t *testing.T) {
 			{Date: date(2025, 6, 15)},
 		}
 		got := CommitsToDailyStats(commits)
+		if len(got) == 0 {
+			t.Fatal("expected at least one stat")
+		}
 		if !got[0].Date.Equal(date(2025, 6, 15)) {
 			t.Errorf("first date = %v, want 2025-06-15", got[0].Date)
 		}
@@ -772,7 +766,10 @@ func TestFilterCommits(t *testing.T) {
 		}
 		got := FilterCommits(commits, expr)
 		if len(got) != 1 {
-			t.Errorf("len = %d, want 1", len(got))
+			t.Fatalf("len = %d, want 1", len(got))
+		}
+		if got[0].Message != "fix bug" {
+			t.Errorf("message = %q, want %q", got[0].Message, "fix bug")
 		}
 	})
 
