@@ -429,7 +429,7 @@ func TestCollectFileLineCounts(t *testing.T) {
 	}
 }
 
-func date(year int, month time.Month, day int) time.Time {
+func utcDate(year int, month time.Month, day int) time.Time {
 	return time.Date(year, month, day, 0, 0, 0, 0, time.UTC)
 }
 
@@ -442,17 +442,17 @@ func TestTruncateToDay(t *testing.T) {
 		{
 			name:  "strips hours and minutes",
 			input: time.Date(2025, 6, 15, 14, 30, 45, 123, time.UTC),
-			want:  date(2025, 6, 15),
+			want:  utcDate(2025, 6, 15),
 		},
 		{
 			name:  "midnight stays midnight",
-			input: date(2025, 1, 1),
-			want:  date(2025, 1, 1),
+			input: utcDate(2025, 1, 1),
+			want:  utcDate(2025, 1, 1),
 		},
 		{
 			name:  "non-UTC timezone keeps wall-clock date",
 			input: time.Date(2025, 3, 10, 23, 59, 59, 0, time.FixedZone("EST", -5*3600)),
-			want:  date(2025, 3, 10),
+			want:  utcDate(2025, 3, 10),
 		},
 	}
 	for _, tt := range tests {
@@ -473,44 +473,44 @@ func TestBucketKey(t *testing.T) {
 		// Daily returns the input unchanged.
 		{
 			name: "daily passthrough",
-			date: date(2025, 6, 15),
+			date: utcDate(2025, 6, 15),
 			gran: GranularityDaily,
-			want: date(2025, 6, 15),
+			want: utcDate(2025, 6, 15),
 		},
 		// Weekly: Monday maps to itself.
 		{
 			name: "weekly monday",
-			date: date(2025, 6, 16), // Monday
+			date: utcDate(2025, 6, 16), // Monday
 			gran: GranularityWeekly,
-			want: date(2025, 6, 16),
+			want: utcDate(2025, 6, 16),
 		},
 		// Weekly: Wednesday maps to preceding Monday.
 		{
 			name: "weekly wednesday",
-			date: date(2025, 6, 18), // Wednesday
+			date: utcDate(2025, 6, 18), // Wednesday
 			gran: GranularityWeekly,
-			want: date(2025, 6, 16),
+			want: utcDate(2025, 6, 16),
 		},
 		// Weekly: Sunday maps to preceding Monday.
 		{
 			name: "weekly sunday",
-			date: date(2025, 6, 22), // Sunday
+			date: utcDate(2025, 6, 22), // Sunday
 			gran: GranularityWeekly,
-			want: date(2025, 6, 16),
+			want: utcDate(2025, 6, 16),
 		},
 		// Monthly: any day maps to the 1st.
 		{
 			name: "monthly",
-			date: date(2025, 6, 18),
+			date: utcDate(2025, 6, 18),
 			gran: GranularityMonthly,
-			want: date(2025, 6, 1),
+			want: utcDate(2025, 6, 1),
 		},
 		// Yearly: any day maps to Jan 1.
 		{
 			name: "yearly",
-			date: date(2025, 6, 18),
+			date: utcDate(2025, 6, 18),
 			gran: GranularityYearly,
-			want: date(2025, 1, 1),
+			want: utcDate(2025, 1, 1),
 		},
 	}
 	for _, tt := range tests {
@@ -565,13 +565,13 @@ func TestCommitsToDailyStats(t *testing.T) {
 
 	t.Run("single commit", func(t *testing.T) {
 		commits := []CommitInfo{
-			{Date: date(2025, 6, 15)},
+			{Date: utcDate(2025, 6, 15)},
 		}
 		got := CommitsToDailyStats(commits)
 		if len(got) == 0 {
 			t.Fatal("expected at least one stat")
 		}
-		if !got[0].Date.Equal(date(2025, 6, 15)) {
+		if !got[0].Date.Equal(utcDate(2025, 6, 15)) {
 			t.Errorf("first stat date = %v, want 2025-06-15", got[0].Date)
 		}
 		if got[0].Count != 1 {
@@ -580,7 +580,7 @@ func TestCommitsToDailyStats(t *testing.T) {
 	})
 
 	t.Run("multiple commits same day", func(t *testing.T) {
-		d := date(2025, 6, 15)
+		d := utcDate(2025, 6, 15)
 		commits := []CommitInfo{
 			{Date: d},
 			{Date: d},
@@ -620,14 +620,14 @@ func TestCommitsToDailyStats(t *testing.T) {
 
 	t.Run("starts at earliest commit", func(t *testing.T) {
 		commits := []CommitInfo{
-			{Date: date(2025, 6, 20)},
-			{Date: date(2025, 6, 15)},
+			{Date: utcDate(2025, 6, 20)},
+			{Date: utcDate(2025, 6, 15)},
 		}
 		got := CommitsToDailyStats(commits)
 		if len(got) == 0 {
 			t.Fatal("expected at least one stat")
 		}
-		if !got[0].Date.Equal(date(2025, 6, 15)) {
+		if !got[0].Date.Equal(utcDate(2025, 6, 15)) {
 			t.Errorf("first date = %v, want 2025-06-15", got[0].Date)
 		}
 	})
@@ -636,8 +636,8 @@ func TestCommitsToDailyStats(t *testing.T) {
 func TestAggregateStats(t *testing.T) {
 	t.Run("daily returns input unchanged", func(t *testing.T) {
 		daily := []DayStat{
-			{Date: date(2025, 6, 15), Count: 3},
-			{Date: date(2025, 6, 16), Count: 1},
+			{Date: utcDate(2025, 6, 15), Count: 3},
+			{Date: utcDate(2025, 6, 16), Count: 1},
 		}
 		got := AggregateStats(daily, GranularityDaily)
 		if len(got) != len(daily) {
@@ -659,9 +659,9 @@ func TestAggregateStats(t *testing.T) {
 
 	t.Run("weekly groups by monday", func(t *testing.T) {
 		daily := []DayStat{
-			{Date: date(2025, 6, 16), Count: 2}, // Monday
-			{Date: date(2025, 6, 17), Count: 3}, // Tuesday, same week
-			{Date: date(2025, 6, 23), Count: 1}, // Next Monday
+			{Date: utcDate(2025, 6, 16), Count: 2}, // Monday
+			{Date: utcDate(2025, 6, 17), Count: 3}, // Tuesday, same week
+			{Date: utcDate(2025, 6, 23), Count: 1}, // Next Monday
 		}
 		got := AggregateStats(daily, GranularityWeekly)
 		if len(got) != 2 {
@@ -677,9 +677,9 @@ func TestAggregateStats(t *testing.T) {
 
 	t.Run("monthly groups by first of month", func(t *testing.T) {
 		daily := []DayStat{
-			{Date: date(2025, 6, 5), Count: 1},
-			{Date: date(2025, 6, 20), Count: 4},
-			{Date: date(2025, 7, 1), Count: 2},
+			{Date: utcDate(2025, 6, 5), Count: 1},
+			{Date: utcDate(2025, 6, 20), Count: 4},
+			{Date: utcDate(2025, 7, 1), Count: 2},
 		}
 		got := AggregateStats(daily, GranularityMonthly)
 		if len(got) != 2 {
@@ -695,9 +695,9 @@ func TestAggregateStats(t *testing.T) {
 
 	t.Run("yearly groups by jan 1", func(t *testing.T) {
 		daily := []DayStat{
-			{Date: date(2024, 3, 10), Count: 1},
-			{Date: date(2024, 11, 5), Count: 2},
-			{Date: date(2025, 1, 15), Count: 7},
+			{Date: utcDate(2024, 3, 10), Count: 1},
+			{Date: utcDate(2024, 11, 5), Count: 2},
+			{Date: utcDate(2025, 1, 15), Count: 7},
 		}
 		got := AggregateStats(daily, GranularityYearly)
 		if len(got) != 2 {
@@ -713,9 +713,9 @@ func TestAggregateStats(t *testing.T) {
 
 	t.Run("results sorted chronologically", func(t *testing.T) {
 		daily := []DayStat{
-			{Date: date(2025, 8, 1), Count: 1},
-			{Date: date(2025, 6, 1), Count: 2},
-			{Date: date(2025, 7, 1), Count: 3},
+			{Date: utcDate(2025, 8, 1), Count: 1},
+			{Date: utcDate(2025, 6, 1), Count: 2},
+			{Date: utcDate(2025, 7, 1), Count: 3},
 		}
 		got := AggregateStats(daily, GranularityMonthly)
 		if len(got) != 3 {
@@ -792,9 +792,9 @@ func TestBuildHealthData(t *testing.T) {
 		"README.md": 30,
 	}
 	commits := []CommitInfo{
-		{Author: "alice", Date: date(2025, 6, 15), Files: []string{"main.go"}},
-		{Author: "bob", Date: date(2025, 6, 16), Files: []string{"main.go", "utils.go"}},
-		{Author: "alice", Date: date(2025, 6, 20), Files: []string{"main.go"}},
+		{Author: "alice", Date: utcDate(2025, 6, 15), Files: []string{"main.go"}},
+		{Author: "bob", Date: utcDate(2025, 6, 16), Files: []string{"main.go", "utils.go"}},
+		{Author: "alice", Date: utcDate(2025, 6, 20), Files: []string{"main.go"}},
 	}
 
 	t.Run("unfiltered includes all files from lineCounts", func(t *testing.T) {
@@ -817,7 +817,7 @@ func TestBuildHealthData(t *testing.T) {
 		if main.Churn != 3 {
 			t.Errorf("main.go churn = %d, want 3", main.Churn)
 		}
-		if !main.LastChanged.Equal(date(2025, 6, 20)) {
+		if !main.LastChanged.Equal(utcDate(2025, 6, 20)) {
 			t.Errorf("main.go last changed = %v, want 2025-06-20", main.LastChanged)
 		}
 
