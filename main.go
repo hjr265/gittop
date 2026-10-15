@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -49,6 +50,24 @@ func openFromEnv() (*git.Repository, string, error) {
 	return repo, gitDir, err
 }
 
+// openRepository opens the repository at path, which may be a working tree
+// (or a directory inside one), a linked worktree, or a bare repository.
+func openRepository(path string) (*git.Repository, error) {
+	repo, err := git.PlainOpenWithOptions(path, &git.PlainOpenOptions{
+		DetectDotGit: true,
+		// Linked worktrees keep their objects and refs in the main
+		// repository's directory.
+		EnableDotGitCommonDir: true,
+	})
+	if err == nil {
+		return repo, nil
+	}
+	if bare, bareErr := openBareRepository(path); bareErr == nil {
+		return bare, nil
+	}
+	return nil, err
+}
+
 func main() {
 	path := "."
 	if len(os.Args) > 1 {
@@ -56,26 +75,30 @@ func main() {
 	}
 
 	var repo *git.Repository
-	var err error
-
 	if len(os.Args) <= 1 {
-		repo, path, err = openFromEnv()
-	}
-	if err != nil || repo == nil {
-		repo, err = git.PlainOpenWithOptions(path, &git.PlainOpenOptions{
-			DetectDotGit: true,
-		})
-		if err != nil {
-			repo, err = openBareRepository(path)
+		if r, p, err := openFromEnv(); err == nil {
+			repo, path = r, p
 		}
 	}
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: not a git repository: %s\n", path)
-		os.Exit(1)
+	if repo == nil {
+		var err error
+		repo, err = openRepository(path)
+		if errors.Is(err, git.ErrRepositoryNotExists) {
+			fmt.Fprintf(os.Stderr, "Error: not a git repository: %s\n", path)
+			os.Exit(1)
+		}
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: cannot open %s: %v\n", path, err)
+			os.Exit(1)
+		}
 	}
 
 	m := newModel(repo, path)
-	p := tea.NewProgram(m, tea.WithAltScreen())
+	opts := []tea.ProgramOption{tea.WithAltScreen()}
+	if m.mouse {
+		opts = append(opts, tea.WithMouseCellMotion())
+	}
+	p := tea.NewProgram(m, opts...)
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)

@@ -36,6 +36,7 @@ type healthPage struct {
 	filtered   bool             // true when a global filter is active
 	files      []FileHealthInfo // recomputed from lineCounts + commits
 	view       healthView
+	err        error // set if the file tree could not be read
 
 	// Local file pattern filter.
 	pathPattern string // glob pattern, e.g. "*.go"
@@ -50,6 +51,7 @@ func (p *healthPage) Init() tea.Cmd { return nil }
 func (p *healthPage) Update(msg tea.Msg) (Page, tea.Cmd) {
 	switch msg := msg.(type) {
 	case healthTreeMsg:
+		p.err = msg.err
 		if msg.err == nil {
 			p.lineCounts = msg.lineCounts
 			p.recompute()
@@ -157,6 +159,10 @@ func (p *healthPage) View(width, height int) string {
 	}
 	b.WriteString("\n\n")
 
+	if p.err != nil {
+		b.WriteString(fmt.Sprintf("  Could not read files: %v", p.err))
+		return b.String()
+	}
 	if p.lineCounts == nil {
 		b.WriteString("  Loading health data...")
 		return b.String()

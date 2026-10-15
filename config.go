@@ -14,6 +14,7 @@ type Config struct {
 	ThemeName   string `toml:"theme"`        // "Default", "Grayscale", or "Custom"
 	Truecolor   bool   `toml:"truecolor"`    // true = 24-bit, false = 256-color
 	GraphSymbol string `toml:"graph_symbol"` // "braille" or "block"
+	Mouse       bool   `toml:"mouse"`        // wheel scrolling and tab clicks
 	CustomTheme *Theme `toml:"custom_theme,omitempty"`
 }
 
@@ -21,6 +22,7 @@ func defaultConfig() Config {
 	return Config{
 		ThemeName:   "default",
 		GraphSymbol: "braille",
+		Mouse:       true,
 	}
 }
 
@@ -80,5 +82,6 @@ func (m model) ToConfig() Config {
 		ThemeName:   strings.ToLower(m.theme.Name),
 		Truecolor:   m.truecolor,
 		GraphSymbol: sym,
+		Mouse:       m.mouse,
 	}
 }

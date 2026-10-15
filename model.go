@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
@@ -15,6 +16,10 @@ import (
 const (
 	chromeTopHeight    = 2 // top bar + tab bar
 	chromeBottomHeight = 1 // keybinding bar or filter input
+	tabBarRow          = 1 // screen row of the tab bar
+
+	optionCount       = 4  // rows in the options menu
+	optionsInnerWidth = 36 // width of the options menu inside its border
 )
 
 type model struct {
@@ -56,6 +61,7 @@ type model struct {
 	// Tag/release data.
 	tags        []TagInfo
 	commitsSince int // commits since latest tag (unfiltered)
+	sinceTag    string // tag commitsSince is counted from
 	tagsLoaded  bool
 	tagsLoading bool
 
@@ -69,6 +75,7 @@ type model struct {
 	theme         Theme
 	truecolor     bool
 	graphSymbol   GraphSymbol
+	mouse       bool
 }
 
 type commitsMsg struct {
@@ -92,6 +99,7 @@ type statsMsg struct {
 type tagsDataMsg struct {
 	tags          []TagInfo
 	commitsSince  int // commits since latest tag
+	sinceTag      string // tag commitsSince is counted from
 	err           error
 }
 
@@ -125,6 +133,7 @@ func newModel(repo *git.Repository, path string) model {
 		theme:       theme,
 		truecolor:   cfg.Truecolor,
 		graphSymbol: cfg.GraphSymbolValue(),
+		mouse:       cfg.Mouse,
 	}
 	m.pages = []Page{
 		newSummaryPage(),
@@ -145,11 +154,18 @@ func newModel(repo *git.Repository, path string) model {
 }
 
 func (m model) Init() tea.Cmd {
+	return loadCommits(m.repo)
+}
+
+// loadCommits returns a command that scans the repository: the mailmap, the
+// commits reachable from HEAD, the current branch, and whether the clone is
+// shallow. It reports them in a commitsMsg.
+func loadCommits(repo *git.Repository) tea.Cmd {
 	return func() tea.Msg {
-		mm := LoadMailmap(m.repo)
-		commits, err := CollectCommits(m.repo, false, mm)
+		mm := LoadMailmap(repo)
+		commits, err := CollectCommits(repo, mm)
 		branch := ""
-		if ref, e := m.repo.Head(); e == nil {
+		if ref, e := repo.Head(); e == nil {
 			if ref.Name().IsBranch() {
 				branch = ref.Name().Short()
 			} else {
@@ -157,10 +173,43 @@ func (m model) Init() tea.Cmd {
 			}
 		}
 		shallow := false
-		if hashes, serr := m.repo.Storer.Shallow(); serr == nil && len(hashes) > 0 {
+		if hashes, serr := repo.Storer.Shallow(); serr == nil && len(hashes) > 0 {
 			shallow = true
 		}
 		return commitsMsg{commits: commits, branch: branch, shallow: shallow, err: err, mailmap: mm}
+	}
+}
+
+// pageCapturesKeys reports whether the active page is in a mode that takes
+// every key press: a text input, or a sub-view with its own keys.
+func (m model) pageCapturesKeys() bool {
+	switch p := m.pages[m.activeTab].(type) {
+	case *commitsPage:
+		return p.showDiff || p.searching
+	case *healthPage:
+		return p.editing
+	}
+	return false
+}
+
+// loadCommitFiles returns a command that adds file lists to the loaded
+// commits and reports them in a commitsWithFilesMsg.
+func (m model) loadCommitFiles() tea.Cmd {
+	repo, mm, commits := m.repo, m.mailmap, m.commits
+	return func() tea.Msg {
+		if commits == nil {
+			// The first scan has not finished yet, so walk the history here.
+			if mm == nil {
+				mm = LoadMailmap(repo)
+			}
+			var err error
+			commits, err = CollectCommits(repo, mm)
+			if err != nil {
+				return commitsWithFilesMsg{err: err}
+			}
+		}
+		withFiles, err := WithCommitFiles(repo, commits)
+		return commitsWithFilesMsg{commits: withFiles, err: err}
 	}
 }
 
@@ -264,7 +313,7 @@ func (m *model) propagateTags(filteredCommits []CommitInfo) {
 		filtered = matched
 	}
 
-	msg := tagsDataMsg{tags: filtered, commitsSince: m.commitsSince}
+	msg := tagsDataMsg{tags: filtered, commitsSince: m.commitsSince, sinceTag: m.sinceTag}
 	for i, p := range m.pages {
 		updated, _ := p.Update(msg)
 		m.pages[i] = updated
@@ -335,11 +384,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			repo := m.repo
 			return m, func() tea.Msg {
 				tags, err := CollectTags(repo)
-				commitsSince := 0
-				if err == nil && len(tags) > 0 && tags[0].CommitHash != "" {
-					commitsSince = CountCommitsSince(repo, tags[0].CommitHash)
+				sinceTag, commitsSince := "", 0
+				if err == nil {
+					sinceTag, commitsSince = CommitsSinceLatestTag(repo, tags)
 				}
-				return tagsDataMsg{tags: tags, commitsSince: commitsSince, err: err}
+				return tagsDataMsg{tags: tags, commitsSince: commitsSince, sinceTag: sinceTag, err: err}
 			}
 		}
 		return m, nil
@@ -372,6 +421,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.tagsLoaded = true
 		m.tags = msg.tags
 		m.commitsSince = msg.commitsSince
+		m.sinceTag = msg.sinceTag
 		// Build filtered commits for tag filtering.
 		cutoff := m.rangeCutoff()
 		source := m.commits
@@ -395,9 +445,47 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case tea.MouseMsg:
+		if m.loading || m.err != nil || m.filterActive {
+			return m, nil
+		}
+		click := msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonLeft
+		if m.optionsOpen {
+			if !click {
+				return m, nil
+			}
+			pageHeight := max(m.height-chromeTopHeight-chromeBottomHeight, 1)
+			row, inside := optionRowAt(msg.X, msg.Y-chromeTopHeight, m.width, pageHeight)
+			if !inside {
+				m.optionsOpen = false
+				return m, nil
+			}
+			if row < 0 {
+				return m, nil
+			}
+			// Change the clicked option the same way the keyboard does.
+			m.optionsCursor = row
+			return m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		}
+		switch {
+		case wheelStep(msg) != 0:
+			updated, cmd := m.pages[m.activeTab].Update(msg)
+			m.pages[m.activeTab] = updated
+			return m, cmd
+		case click && msg.Y == tabBarRow:
+			if tab := tabAt(msg.X); tab >= 0 {
+				m.activeTab = tab
+			}
+		case click && msg.Y == m.height-1:
+			if b, ok := bindingAt(m.bottomBindings(), msg.X); ok && b.click != "" {
+				return m.Update(keyMsgFor(b.click))
+			}
+		}
+
 	case tea.KeyMsg:
 		// Options menu mode.
 		if m.optionsOpen {
+			var cmd tea.Cmd
 			switch msg.String() {
 			case "esc", "o", "q":
 				m.optionsOpen = false
@@ -406,7 +494,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.optionsCursor--
 				}
 			case "down", "j":
-				if m.optionsCursor < 2 {
+				if m.optionsCursor < optionCount-1 {
 					m.optionsCursor++
 				}
 			case "left", "right", "h", "l", "enter":
@@ -449,8 +537,17 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 					_ = SaveConfig(m.ToConfig())
 				}
+				if m.optionsCursor == 3 {
+					m.mouse = !m.mouse
+					if m.mouse {
+						cmd = tea.EnableMouseCellMotion
+					} else {
+						cmd = tea.DisableMouse
+					}
+					_ = SaveConfig(m.ToConfig())
+				}
 			}
-			return m, nil
+			return m, cmd
 		}
 
 		// Filter input mode.
@@ -465,11 +562,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// If filter needs files and we don't have them, trigger re-scan.
 				if m.filterExpr != nil && FilterNeedsFiles(m.filterExpr) && m.commitsWithFiles == nil && !m.filtering {
 					m.filtering = true
-					mm := m.mailmap
-					return m, func() tea.Msg {
-						commits, err := CollectCommits(m.repo, true, mm)
-						return commitsWithFilesMsg{commits: commits, err: err}
-					}
+					return m, m.loadCommitFiles()
 				}
 				return m, nil
 			case "esc":
@@ -483,13 +576,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
-		// Delegate to commits page when it's in diff view or search mode.
-		if m.activeTab == TabCommits {
-			if cp, ok := m.pages[TabCommits].(*commitsPage); ok && (cp.showDiff || cp.searching) {
-				updated, cmd := m.pages[TabCommits].Update(msg)
-				m.pages[TabCommits] = updated
-				return m, cmd
+		// A page in a text input or its own sub-view gets every key, so that
+		// typing does not trigger the global shortcuts below.
+		if m.pageCapturesKeys() {
+			if msg.String() == "ctrl+c" {
+				return m, tea.Quit
 			}
+			updated, cmd := m.pages[m.activeTab].Update(msg)
+			m.pages[m.activeTab] = updated
+			return m, cmd
 		}
 
 		// Normal mode.
@@ -506,6 +601,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if cp, ok := m.pages[TabCommits].(*commitsPage); ok && cp.searchQuery != "" {
 					updated, cmd := m.pages[TabCommits].Update(msg)
 					m.pages[TabCommits] = updated
+					return m, cmd
+				}
+			}
+			// On files tab with an active path filter, clear that first.
+			if m.activeTab == TabFiles {
+				if hp, ok := m.pages[TabFiles].(*healthPage); ok && hp.pathPattern != "" {
+					updated, cmd := m.pages[TabFiles].Update(msg)
+					m.pages[TabFiles] = updated
 					return m, cmd
 				}
 			}
@@ -561,24 +664,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.healthLoading = false
 			m.filtering = false
 			m.commitsSince = 0
-			repo := m.repo
-			return m, func() tea.Msg {
-				mm := LoadMailmap(repo)
-				commits, err := CollectCommits(repo, false, mm)
-				branch := ""
-				if ref, e := repo.Head(); e == nil {
-					if ref.Name().IsBranch() {
-						branch = ref.Name().Short()
-					} else {
-						branch = ref.Hash().String()[:8]
-					}
-				}
-				shallow := false
-				if hashes, serr := repo.Storer.Shallow(); serr == nil && len(hashes) > 0 {
-					shallow = true
-				}
-				return commitsMsg{commits: commits, branch: branch, shallow: shallow, err: err, mailmap: mm}
-			}
+			m.sinceTag = ""
+			return m, loadCommits(m.repo)
 		case "o":
 			m.optionsOpen = true
 			m.optionsCursor = 0
@@ -610,19 +697,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// Trigger file data loading for Contributors ownership view.
 	if m.activeTab == TabContributors && m.commitsWithFiles == nil && !m.filtering {
 		m.filtering = true
-		repo := m.repo
-		mm := m.mailmap
-		return m, func() tea.Msg {
-			commits, err := CollectCommits(repo, true, mm)
-			return commitsWithFilesMsg{commits: commits, err: err}
-		}
+		return m, m.loadCommitFiles()
 	}
 
 	// Trigger health data loading when Health tab is active.
 	if m.activeTab == TabFiles && !m.healthLoaded && !m.healthLoading {
 		m.healthLoading = true
 		repo := m.repo
-		mm := m.mailmap
 		cmds := []tea.Cmd{
 			func() tea.Msg {
 				lineCounts, err := CollectFileLineCounts(repo)
@@ -632,10 +713,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Also load commits with files if not already loaded.
 		if m.commitsWithFiles == nil && !m.filtering {
 			m.filtering = true
-			cmds = append(cmds, func() tea.Msg {
-				commits, err := CollectCommits(repo, true, mm)
-				return commitsWithFilesMsg{commits: commits, err: err}
-			})
+			cmds = append(cmds, m.loadCommitFiles())
 		}
 		return m, tea.Batch(cmds...)
 	}
@@ -749,6 +827,21 @@ func (m model) viewTopBar() string {
 	return left + filterIndicator + filler + rangeIndicator + dimOnBar.Render(" ")
 }
 
+// tabAt returns the index of the tab drawn at column x of the tab bar, or -1
+// if there is none. It must match the layout in viewTabBar.
+func tabAt(x int) int {
+	start := 0
+	for i, name := range tabNames {
+		// Label plus one cell of padding on each side.
+		w := lipgloss.Width(fmt.Sprintf("[%d] %s", i+1, name)) + 2
+		if x >= start && x < start+w {
+			return i
+		}
+		start += w
+	}
+	return -1
+}
+
 func (m model) viewTabBar() string {
 	var parts []string
 
@@ -783,6 +876,141 @@ func (m model) viewTabBar() string {
 	return tabContent + filler
 }
 
+// keyBinding is one entry in the bottom bar.
+type keyBinding struct {
+	key, desc string
+	click     string // key a mouse click sends, empty if not clickable
+}
+
+// bottomBindings returns the entries of the bottom bar, left to right.
+func (m model) bottomBindings() []keyBinding {
+	bindings := []keyBinding{
+		{"1-7", "pages", ""},
+		{"tab", "next", "tab"},
+		{"+/-", "range", ""},
+		{"/", "filter", "/"},
+		{"o", "options", "o"},
+		{"r", "refresh", "r"},
+		{"q", "quit", "q"},
+	}
+
+	if m.filterQuery != "" {
+		bindings = append(bindings, keyBinding{"esc", "clear filter", "esc"})
+	}
+
+	// While the page takes every key, the bindings above do nothing.
+	if m.pageCapturesKeys() {
+		for i := range bindings {
+			bindings[i].click = ""
+		}
+	}
+
+	// Page-specific bindings.
+	if m.activeTab == TabSummary {
+		bindings = append(bindings,
+			keyBinding{"d/w/m/y", "granularity", ""},
+		)
+	}
+	if m.activeTab == TabBranches {
+		bindings = append(bindings,
+			keyBinding{"s/S", "sort/order", ""},
+			keyBinding{"j/k", "scroll", ""},
+		)
+	}
+	if m.activeTab == TabActivity {
+		bindings = append(bindings,
+			keyBinding{"v", "cycle view", "v"},
+		)
+	}
+	if m.activeTab == TabContributors {
+		bindings = append(bindings,
+			keyBinding{"v", "cycle view", "v"},
+			keyBinding{"j/k", "scroll", ""},
+		)
+	}
+	if m.activeTab == TabReleases {
+		bindings = append(bindings,
+			keyBinding{"v", "cycle view", "v"},
+			keyBinding{"j/k", "scroll", ""},
+		)
+	}
+	if m.activeTab == TabCommits {
+		if cp, ok := m.pages[TabCommits].(*commitsPage); ok && cp.showDiff {
+			bindings = append(bindings,
+				keyBinding{"esc", "back", "esc"},
+				keyBinding{"j/k", "scroll", ""},
+				keyBinding{"g/G", "top/bottom", ""},
+			)
+		} else if cp, ok := m.pages[TabCommits].(*commitsPage); ok && cp.searching {
+			bindings = append(bindings,
+				keyBinding{"enter", "search", "enter"},
+				keyBinding{"esc", "cancel", "esc"},
+			)
+		} else {
+			bindings = append(bindings,
+				keyBinding{"enter", "open diff", "enter"},
+				keyBinding{"s", "search", "s"},
+				keyBinding{"j/k", "scroll", ""},
+				keyBinding{"g/G", "top/bottom", ""},
+			)
+			if cp, ok := m.pages[TabCommits].(*commitsPage); ok && cp.searchQuery != "" {
+				bindings = append(bindings, keyBinding{"esc", "clear search", "esc"})
+			}
+		}
+	}
+	if m.activeTab == TabFiles {
+		hp, _ := m.pages[TabFiles].(*healthPage)
+		if hp != nil && hp.editing {
+			bindings = append(bindings,
+				keyBinding{"enter", "apply", "enter"},
+				keyBinding{"esc", "cancel", "esc"},
+			)
+		} else {
+			bindings = append(bindings,
+				keyBinding{"v", "cycle view", "v"},
+				keyBinding{"f", "file filter", "f"},
+			)
+			if hp != nil && hp.pathPattern != "" {
+				bindings = append(bindings, keyBinding{"esc", "clear file filter", "esc"})
+			}
+		}
+	}
+
+	return bindings
+}
+
+// bindingWidth is the number of columns a binding takes in the bottom bar.
+func bindingWidth(b keyBinding) int {
+	return lipgloss.Width(b.key) + lipgloss.Width(b.desc) + 2
+}
+
+// bindingAt returns the binding drawn at column x of the bottom bar. It must
+// match the layout in viewBottomBar.
+func bindingAt(bindings []keyBinding, x int) (keyBinding, bool) {
+	start := 0
+	for _, b := range bindings {
+		w := bindingWidth(b)
+		if x >= start && x < start+w {
+			return b, true
+		}
+		start += w + 2 // separator
+	}
+	return keyBinding{}, false
+}
+
+// keyMsgFor builds the key message a click on a binding stands for.
+func keyMsgFor(key string) tea.KeyMsg {
+	switch key {
+	case "tab":
+		return tea.KeyMsg{Type: tea.KeyTab}
+	case "esc":
+		return tea.KeyMsg{Type: tea.KeyEsc}
+	case "enter":
+		return tea.KeyMsg{Type: tea.KeyEnter}
+	}
+	return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(key)}
+}
+
 func (m model) viewBottomBar() string {
 	barStyle := lipgloss.NewStyle().
 		Background(chromeBg).
@@ -812,79 +1040,7 @@ func (m model) viewBottomBar() string {
 	}
 
 	// Normal bottom bar.
-	bindings := []struct{ key, desc string }{
-		{"1-7", "pages"},
-		{"tab", "next"},
-		{"+/-", "range"},
-		{"/", "filter"},
-		{"o", "options"},
-		{"r", "refresh"},
-		{"q", "quit"},
-	}
-
-	if m.filterQuery != "" {
-		bindings = append(bindings, struct{ key, desc string }{"esc", "clear filter"})
-	}
-
-	// Page-specific bindings.
-	if m.activeTab == TabSummary {
-		bindings = append(bindings,
-			struct{ key, desc string }{"d/w/m/y", "granularity"},
-		)
-	}
-	if m.activeTab == TabBranches {
-		bindings = append(bindings,
-			struct{ key, desc string }{"s/S", "sort/order"},
-			struct{ key, desc string }{"j/k", "scroll"},
-		)
-	}
-	if m.activeTab == TabActivity {
-		bindings = append(bindings,
-			struct{ key, desc string }{"v", "cycle view"},
-		)
-	}
-	if m.activeTab == TabContributors {
-		bindings = append(bindings,
-			struct{ key, desc string }{"v", "cycle view"},
-			struct{ key, desc string }{"j/k", "scroll"},
-		)
-	}
-	if m.activeTab == TabReleases {
-		bindings = append(bindings,
-			struct{ key, desc string }{"v", "cycle view"},
-			struct{ key, desc string }{"j/k", "scroll"},
-		)
-	}
-	if m.activeTab == TabCommits {
-		if cp, ok := m.pages[TabCommits].(*commitsPage); ok && cp.showDiff {
-			bindings = append(bindings,
-				struct{ key, desc string }{"esc", "back"},
-				struct{ key, desc string }{"j/k", "scroll"},
-				struct{ key, desc string }{"g/G", "top/bottom"},
-			)
-		} else if cp, ok := m.pages[TabCommits].(*commitsPage); ok && cp.searching {
-			bindings = append(bindings,
-				struct{ key, desc string }{"enter", "search"},
-				struct{ key, desc string }{"esc", "cancel"},
-			)
-		} else {
-			bindings = append(bindings,
-				struct{ key, desc string }{"enter", "open diff"},
-				struct{ key, desc string }{"s", "search"},
-				struct{ key, desc string }{"j/k", "scroll"},
-				struct{ key, desc string }{"g/G", "top/bottom"},
-			)
-			if cp, ok := m.pages[TabCommits].(*commitsPage); ok && cp.searchQuery != "" {
-				bindings = append(bindings, struct{ key, desc string }{"esc", "clear search"})
-			}
-		}
-	}
-	if m.activeTab == TabFiles {
-		bindings = append(bindings,
-			struct{ key, desc string }{"v", "cycle view"},
-			struct{ key, desc string }{"f", "file filter"},
-		)
-	}
+	bindings := m.bottomBindings()
 
 	var parts []string
 	for _, bind := range bindings {
@@ -911,6 +1067,30 @@ func (m model) viewBottomBar() string {
 	return content + filler
 }
 
+// optionRowAt reports what the options menu shows at position (x, y) of a page
+// area of the given size: whether the position is inside the menu, and the
+// index of the option row there, or -1. It must match the layout in
+// viewOptions.
+func optionRowAt(x, y, width, height int) (row int, inside bool) {
+	boxWidth := optionsInnerWidth + 2
+	boxHeight := optionCount + 6 // border, title, blank, options, blank, hint, border
+
+	// Same rounding as lipgloss.Place with lipgloss.Center.
+	gapX := max(width-boxWidth, 0)
+	gapY := max(height-boxHeight, 0)
+	left := gapX - int(math.Round(float64(gapX)*0.5))
+	top := gapY - int(math.Round(float64(gapY)*0.5))
+
+	if x < left || x >= left+boxWidth || y < top || y >= top+boxHeight {
+		return -1, false
+	}
+	row = y - top - 3 // border, title, blank
+	if row < 0 || row >= optionCount {
+		return -1, true
+	}
+	return row, true
+}
+
 func (m model) viewOptions(width, height int) string {
 	type option struct {
 		label string
@@ -924,13 +1104,18 @@ func (m model) viewOptions(width, height int) string {
 	if m.graphSymbol == GraphBlock {
 		graphSymbolName = "Block"
 	}
+	mouseName := "Off"
+	if m.mouse {
+		mouseName = "On"
+	}
 	options := []option{
 		{"Color theme", m.theme.Name},
 		{"Truecolor", truecolorName},
 		{"Graph symbol", graphSymbolName},
+		{"Mouse", mouseName},
 	}
 
-	innerWidth := 36
+	innerWidth := optionsInnerWidth
 
 	borderStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).

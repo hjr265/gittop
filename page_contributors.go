@@ -47,6 +47,7 @@ type contributorsPage struct {
 	authors     []authorInfo
 	cursor      int
 	offset      int // scroll offset for left panel
+	rows        int // visible rows at last render
 	needFiles   bool
 	graphSymbol GraphSymbol
 	view        contributorsView
@@ -63,6 +64,10 @@ func (p *contributorsPage) Update(msg tea.Msg) (Page, tea.Cmd) {
 		p.recompute()
 	case graphSymbolMsg:
 		p.graphSymbol = msg.symbol
+	case tea.MouseMsg:
+		if step := wheelStep(msg); step != 0 {
+			p.cursor = max(0, min(p.cursor+step, len(p.authors)-1))
+		}
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "v":
@@ -75,10 +80,12 @@ func (p *contributorsPage) Update(msg tea.Msg) (Page, tea.Cmd) {
 			if p.cursor > 0 {
 				p.cursor--
 			}
-		case "g":
+		case "pgup", "pgdown", "ctrl+u", "ctrl+d":
+			p.cursor = max(0, min(p.cursor+pageStep(msg.String(), p.rows), len(p.authors)-1))
+		case "g", "home":
 			p.cursor = 0
 			p.offset = 0
-		case "G":
+		case "G", "end":
 			if len(p.authors) > 0 {
 				p.cursor = len(p.authors) - 1
 			}
@@ -297,6 +304,7 @@ func (p *contributorsPage) renderLeftPanel(width, height int) string {
 	if visibleRows < 1 {
 		visibleRows = 1
 	}
+	p.rows = visibleRows
 
 	// Ensure cursor visible.
 	if p.cursor < p.offset {
@@ -406,6 +414,7 @@ func (p *contributorsPage) renderActivityLinePanel(width, height int) string {
 	if visibleRows < 1 {
 		visibleRows = 1
 	}
+	p.rows = visibleRows
 
 	// Ensure cursor visible.
 	if p.cursor < p.offset {

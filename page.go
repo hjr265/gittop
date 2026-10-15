@@ -320,3 +320,36 @@ func renderBarChart(allStats []DayStat, granularity Granularity, width, height i
 
 	return b.String()
 }
+
+// pageStep returns how many rows a paging key moves a list that shows rows
+// rows at a time: a full page for pgup/pgdown, half a page for ctrl+u/ctrl+d.
+// It returns 0 for any other key.
+func pageStep(key string, rows int) int {
+	rows = max(rows, 1)
+	switch key {
+	case "pgdown":
+		return rows
+	case "pgup":
+		return -rows
+	case "ctrl+d":
+		return max(rows/2, 1)
+	case "ctrl+u":
+		return -max(rows/2, 1)
+	}
+	return 0
+}
+
+// wheelRows is how many rows one notch of the mouse wheel scrolls.
+const wheelRows = 3
+
+// wheelStep returns how many rows a mouse wheel event scrolls a list, or 0 if
+// msg is not a wheel event.
+func wheelStep(msg tea.MouseMsg) int {
+	switch msg.Button {
+	case tea.MouseButtonWheelDown:
+		return wheelRows
+	case tea.MouseButtonWheelUp:
+		return -wheelRows
+	}
+	return 0
+}

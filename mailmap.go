@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/go-git/go-git/v5"
@@ -28,62 +29,129 @@ type mailmapMailbox struct {
 	email string
 }
 
-// LoadMailmap reads mailmap data from the repository. It loads the default
-// .mailmap file from HEAD, then applies any additional mappings from the
-// mailmap.file (filesystem path) and mailmap.blob (blob object) Git config
-// options.
+// LoadMailmap reads mailmap data the way Git does. In a repository with a
+// working tree it reads the .mailmap file there; in a bare one it falls back
+// to the .mailmap committed at HEAD. It then applies the mailmap.blob and
+// mailmap.file Git config options, in that order, so the file has the last
+// word.
 func LoadMailmap(repo *git.Repository) *Mailmap {
 	m := &Mailmap{
 		byEmail:     make(map[string]mailmapMailbox),
 		byNameEmail: make(map[mailmapMailbox]mailmapMailbox),
 	}
 
-	// Load default .mailmap from HEAD tree.
-	if ref, err := repo.Head(); err == nil {
-		if commit, err := repo.CommitObject(ref.Hash()); err == nil {
-			if tree, err := commit.Tree(); err == nil {
-				if f, err := tree.File(".mailmap"); err == nil {
-					if reader, err := f.Reader(); err == nil {
-						if content, err := io.ReadAll(reader); err == nil {
-							m.parse(content)
-						}
-						reader.Close()
-					}
+	blobRev, filePath := mailmapConfig(repo)
+	root := ""
+
+	if wt, err := repo.Worktree(); err == nil {
+		root = wt.Filesystem.Root()
+		// Like Git, do not follow a symlinked .mailmap.
+		if fi, err := wt.Filesystem.Lstat(".mailmap"); err == nil && fi.Mode().IsRegular() {
+			if f, err := wt.Filesystem.Open(".mailmap"); err == nil {
+				if content, err := io.ReadAll(f); err == nil {
+					m.parse(content)
 				}
+				f.Close()
 			}
 		}
+	} else if blobRev == "" {
+		blobRev = "HEAD:.mailmap"
 	}
 
-	// Check Git config for mailmap.file and mailmap.blob.
-	cfg, err := repo.ConfigScoped(config.GlobalScope)
-	if err != nil {
-		return m
-	}
-	raw := cfg.Raw
-	sec := raw.Section("mailmap")
-
-	// mailmap.file: read from filesystem path.
-	if filePath := sec.Option("file"); filePath != "" {
-		if content, err := os.ReadFile(filePath); err == nil {
+	if blobRev != "" {
+		if content, err := readRevisionBlob(repo, blobRev); err == nil {
 			m.parse(content)
 		}
 	}
 
-	// mailmap.blob: read from a blob object.
-	if blobRef := sec.Option("blob"); blobRef != "" {
-		if hash, err := repo.ResolveRevision(plumbing.Revision(blobRef)); err == nil {
-			if blob, err := repo.BlobObject(*hash); err == nil {
-				if reader, err := blob.Reader(); err == nil {
-					if content, err := io.ReadAll(reader); err == nil {
-						m.parse(content)
-					}
-					reader.Close()
-				}
-			}
+	if filePath != "" {
+		if content, err := os.ReadFile(expandConfigPath(filePath, root)); err == nil {
+			m.parse(content)
 		}
 	}
 
 	return m
+}
+
+// mailmapConfig returns the mailmap.blob and mailmap.file Git config options.
+// The repository's own config takes precedence over the user's, and the
+// user's over the system's.
+func mailmapConfig(repo *git.Repository) (blob, file string) {
+	var cfgs []*config.Config
+	if cfg, err := repo.Config(); err == nil {
+		cfgs = append(cfgs, cfg)
+	}
+	for _, scope := range []config.Scope{config.GlobalScope, config.SystemScope} {
+		if cfg, err := config.LoadConfig(scope); err == nil {
+			cfgs = append(cfgs, cfg)
+		}
+	}
+
+	for _, cfg := range cfgs {
+		if cfg.Raw == nil || !cfg.Raw.HasSection("mailmap") {
+			continue
+		}
+		sec := cfg.Raw.Section("mailmap")
+		if blob == "" {
+			blob = sec.Option("blob")
+		}
+		if file == "" {
+			file = sec.Option("file")
+		}
+	}
+	return blob, file
+}
+
+// readRevisionBlob reads the blob named by a revision: either
+// "<commit>:<path>", such as "HEAD:.mailmap", or anything that resolves to a
+// blob directly.
+func readRevisionBlob(repo *git.Repository, rev string) ([]byte, error) {
+	if i := strings.Index(rev, ":"); i >= 0 {
+		hash, err := repo.ResolveRevision(plumbing.Revision(rev[:i]))
+		if err != nil {
+			return nil, err
+		}
+		commit, err := repo.CommitObject(*hash)
+		if err != nil {
+			return nil, err
+		}
+		f, err := commit.File(rev[i+1:])
+		if err != nil {
+			return nil, err
+		}
+		content, err := f.Contents()
+		return []byte(content), err
+	}
+
+	hash, err := repo.ResolveRevision(plumbing.Revision(rev))
+	if err != nil {
+		return nil, err
+	}
+	blob, err := repo.BlobObject(*hash)
+	if err != nil {
+		return nil, err
+	}
+	reader, err := blob.Reader()
+	if err != nil {
+		return nil, err
+	}
+	defer reader.Close()
+	return io.ReadAll(reader)
+}
+
+// expandConfigPath resolves a path from Git config: a leading "~/" is the
+// user's home directory, and a relative path is relative to root, if given.
+func expandConfigPath(path, root string) string {
+	if path == "~" || strings.HasPrefix(path, "~/") {
+		if home, err := os.UserHomeDir(); err == nil {
+			return filepath.Join(home, path[1:])
+		}
+		return path
+	}
+	if !filepath.IsAbs(path) && root != "" {
+		return filepath.Join(root, path)
+	}
+	return path
 }
 
 // parse processes .mailmap file content.

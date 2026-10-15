@@ -49,7 +49,11 @@ func (p *summaryPage) Update(msg tea.Msg) (Page, tea.Cmd) {
 		if msg.err == nil && len(msg.tags) > 0 {
 			p.latestTag = msg.tags[0].Name
 			p.tagDate = msg.tags[0].Date
-			p.commitsSince = msg.commitsSince
+			// The count only applies to the tag it was measured from.
+			p.commitsSince = 0
+			if msg.sinceTag == p.latestTag {
+				p.commitsSince = msg.commitsSince
+			}
 		}
 	case graphSymbolMsg:
 		p.graphSymbol = msg.symbol

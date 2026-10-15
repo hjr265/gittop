@@ -2,7 +2,7 @@
 
 A beautiful terminal UI for visualizing Git repository statistics, inspired by htop/btop.
 
-![Go](https://img.shields.io/badge/Go-1.26+-00ADD8?logo=go&logoColor=white)
+![Go](https://img.shields.io/badge/Go-1.27+-00ADD8?logo=go&logoColor=white)
 
 ![Summary — KPI cards and commit activity chart](screenshots/summary.png)
 
@@ -13,7 +13,7 @@ Prototyped rapidly with an agentic coding tool. Read the [blog post](https://hjr
 ### Arch Linux (AUR)
 
 ``` sh
-yay -S gittop
+yay -S gittop-tui-bin
 ```
 
 ### Homebrew
@@ -80,10 +80,14 @@ When no path is given, GitTop also respects the `GIT_DIR` and `GIT_WORK_TREE` en
 | `f` | File path filter (Files tab) |
 | `s` / `S` | Sort column / toggle order (Branches); search (Commits) |
 | `j` / `k` | Scroll down / up |
-| `g` / `G` | Jump to top / bottom |
+| `PgDn` / `PgUp` | Scroll down / up one page |
+| `Ctrl+D` / `Ctrl+U` | Scroll down / up half a page |
+| `g` / `G` or `Home` / `End` | Jump to top / bottom |
 | `Enter` | Open commit diff (Commits) |
-| `o` | Open options menu (color theme, truecolor, graph symbol) |
+| `o` | Open options menu (color theme, truecolor, graph symbol, mouse) |
 | `q` | Quit |
+
+The mouse wheel scrolls lists and the diff view. Clicking a tab switches to it, clicking a single-key entry in the bottom bar (such as `o options`) triggers it, and options in the options menu can be clicked to change them. While mouse support is on, hold `Shift` to select text in most terminals (`Option` in some macOS terminals). Turn it off in the options menu if you prefer plain selection.
 
 ## Recommended Setup
 

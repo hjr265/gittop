@@ -27,6 +27,7 @@ type commitsPage struct {
 	shallow bool
 	offset  int // scroll offset (top of visible window)
 	cursor  int // selected row index (absolute, within filtered/full list)
+	rows    int // visible rows at last render
 
 	// Search state.
 	searching   bool   // true when typing search query
@@ -40,6 +41,7 @@ type commitsPage struct {
 	diff        string
 	diffHeader  string
 	diffOffset  int
+	diffRows    int // visible diff lines at last render
 	diffLoading bool
 }
 
@@ -70,6 +72,14 @@ func (p *commitsPage) Update(msg tea.Msg) (Page, tea.Cmd) {
 		p.diffHeader = fmt.Sprintf("%s  %s  %s", msg.hash, msg.author, msg.date)
 		p.diffOffset = 0
 		p.showDiff = true
+	case tea.MouseMsg:
+		if step := wheelStep(msg); step != 0 {
+			if p.showDiff {
+				p.diffOffset = max(0, p.diffOffset+step)
+			} else {
+				p.cursor = max(0, min(p.cursor+step, p.visibleLen()-1))
+			}
+		}
 	case tea.KeyMsg:
 		if p.showDiff {
 			return p.updateDiffView(msg)
@@ -162,10 +172,12 @@ func (p *commitsPage) updateListView(msg tea.KeyMsg) (Page, tea.Cmd) {
 		if p.cursor > 0 {
 			p.cursor--
 		}
-	case "g":
+	case "pgup", "pgdown", "ctrl+u", "ctrl+d":
+		p.cursor = max(0, min(p.cursor+pageStep(msg.String(), p.rows), n-1))
+	case "g", "home":
 		p.cursor = 0
 		p.offset = 0
-	case "G":
+	case "G", "end":
 		if n > 0 {
 			p.cursor = n - 1
 		}
@@ -205,9 +217,11 @@ func (p *commitsPage) updateDiffView(msg tea.KeyMsg) (Page, tea.Cmd) {
 		if p.diffOffset > 0 {
 			p.diffOffset--
 		}
-	case "g":
+	case "pgup", "pgdown", "ctrl+u", "ctrl+d":
+		p.diffOffset = max(0, p.diffOffset+pageStep(msg.String(), p.diffRows))
+	case "g", "home":
 		p.diffOffset = 0
-	case "G":
+	case "G", "end":
 		p.diffOffset = 999999
 	}
 	return p, nil
@@ -313,6 +327,7 @@ func (p *commitsPage) viewList(width, height int) string {
 	if visibleRows < 1 {
 		visibleRows = 1
 	}
+	p.rows = visibleRows
 
 	// Ensure cursor is visible.
 	if p.cursor < p.offset {
@@ -408,7 +423,7 @@ func (p *commitsPage) viewDiff(width, height int) string {
 	diffHeaderStyle := lipgloss.NewStyle().Foreground(diffFileColor).Bold(true)
 	b.WriteString(fmt.Sprintf("  %s  %s\n",
 		diffHeaderStyle.Render(p.diffHeader),
-		dimStyle.Render("(esc back, j/k scroll)")))
+		dimStyle.Render("(esc back, j/k pgup/pgdn scroll)")))
 	b.WriteString("\n")
 
 	if p.diff == "" {
@@ -422,6 +437,7 @@ func (p *commitsPage) viewDiff(width, height int) string {
 	if contentHeight < 1 {
 		contentHeight = 1
 	}
+	p.diffRows = contentHeight
 
 	maxOffset := len(lines) - contentHeight
 	if maxOffset < 0 {

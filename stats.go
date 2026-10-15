@@ -2,6 +2,9 @@ package main
 
 import (
 	"bytes"
+	"container/heap"
+	"context"
+	"errors"
 	"fmt"
 	"io"
 	"sort"
@@ -29,25 +32,73 @@ type CommitInfo struct {
 	Weekday time.Weekday
 	Month   time.Month
 	Message string
-	Files   []string // populated only when needed (path filter)
+	Files   []string // populated only by WithCommitFiles
+}
+
+// commitQueue is a heap of commits ordered newest first by committer time.
+// Commits with the same time come out in the order they went in.
+type commitQueue []queuedCommit
+
+type queuedCommit struct {
+	commit *object.Commit
+	seq    int
+}
+
+func (q commitQueue) Len() int      { return len(q) }
+func (q commitQueue) Swap(i, j int) { q[i], q[j] = q[j], q[i] }
+func (q commitQueue) Less(i, j int) bool {
+	a, b := q[i].commit.Committer.When, q[j].commit.Committer.When
+	if !a.Equal(b) {
+		return a.After(b)
+	}
+	return q[i].seq < q[j].seq
+}
+func (q *commitQueue) Push(x any) { *q = append(*q, x.(queuedCommit)) }
+func (q *commitQueue) Pop() any {
+	old := *q
+	x := old[len(old)-1]
+	*q = old[:len(old)-1]
+	return x
 }
 
 // CollectCommits walks the entire commit log reachable from HEAD and
-// returns per-commit metadata. If needFiles is true, each commit's
-// changed file paths are computed (slower).
-func CollectCommits(repo *git.Repository, needFiles bool, mm *Mailmap) ([]CommitInfo, error) {
+// returns per-commit metadata, newest first by committer time, as `git log`
+// orders it. Parents that are missing, as in a shallow clone, are skipped.
+// Files is left empty; see WithCommitFiles.
+func CollectCommits(repo *git.Repository, mm *Mailmap) ([]CommitInfo, error) {
 	ref, err := repo.Head()
 	if err != nil {
 		return nil, err
 	}
-
-	iter, err := repo.Log(&git.LogOptions{From: ref.Hash()})
+	head, err := repo.CommitObject(ref.Hash())
 	if err != nil {
 		return nil, err
 	}
 
+	queue := &commitQueue{{commit: head}}
+	queued := map[plumbing.Hash]bool{head.Hash: true}
+	seq := 0
+
 	var commits []CommitInfo
-	err = iter.ForEach(func(c *object.Commit) error {
+	for queue.Len() > 0 {
+		c := heap.Pop(queue).(queuedCommit).commit
+
+		for _, h := range c.ParentHashes {
+			if queued[h] {
+				continue
+			}
+			queued[h] = true
+			parent, err := repo.CommitObject(h)
+			if errors.Is(err, plumbing.ErrObjectNotFound) {
+				continue
+			}
+			if err != nil {
+				return nil, err
+			}
+			seq++
+			heap.Push(queue, queuedCommit{commit: parent, seq: seq})
+		}
+
 		when := c.Author.When
 		name, email := mm.Resolve(c.Author.Name, c.Author.Email)
 		ci := CommitInfo{
@@ -60,21 +111,36 @@ func CollectCommits(repo *git.Repository, needFiles bool, mm *Mailmap) ([]Commit
 			Month:   when.Month(),
 			Message: strings.TrimSpace(c.Message),
 		}
-		if needFiles {
-			ci.Files = commitFiles(c)
-		}
 		commits = append(commits, ci)
-		return nil
-	})
-	if err != nil && err != plumbing.ErrObjectNotFound {
-		return nil, err
 	}
 
 	return commits, nil
 }
 
-// commitFiles returns the list of file paths changed by a commit.
+// WithCommitFiles returns a copy of commits with each commit's changed file
+// paths filled in. This is much slower than collecting the commits. The input
+// is not modified.
+func WithCommitFiles(repo *git.Repository, commits []CommitInfo) ([]CommitInfo, error) {
+	result := make([]CommitInfo, len(commits))
+	copy(result, commits)
+	for i := range result {
+		c, err := repo.CommitObject(plumbing.NewHash(result[i].Hash))
+		if err != nil {
+			return nil, err
+		}
+		result[i].Files = commitFiles(c)
+	}
+	return result, nil
+}
+
+// commitFiles returns the list of file paths changed by a commit. Merge
+// commits report no files, as in `git log --stat`: their changes belong to the
+// commits being merged.
 func commitFiles(c *object.Commit) []string {
+	if c.NumParents() > 1 {
+		return nil
+	}
+
 	tree, err := c.Tree()
 	if err != nil {
 		return nil
@@ -98,7 +164,10 @@ func commitFiles(c *object.Commit) []string {
 		return files
 	}
 
-	changes, err := parentTree.Diff(tree)
+	// Rename detection is off: both sides of a rename are recorded below
+	// anyway, and detecting them means reading blob contents.
+	changes, err := object.DiffTreeWithOptions(context.Background(), parentTree, tree,
+		&object.DiffTreeOptions{DetectRenames: false})
 	if err != nil {
 		return nil
 	}
@@ -236,7 +305,12 @@ type FileHealthInfo struct {
 	Churn       int // number of commits that touched this file
 }
 
+// binarySniffLen is how much of a file is checked for NUL bytes to decide
+// whether it is binary. Git uses the same limit.
+const binarySniffLen = 8000
+
 // CollectFileLineCounts walks the HEAD tree and returns line counts per file.
+// Binary files and files over 1 MB are left out.
 func CollectFileLineCounts(repo *git.Repository) (map[string]int, error) {
 	ref, err := repo.Head()
 	if err != nil {
@@ -252,7 +326,7 @@ func CollectFileLineCounts(repo *git.Repository) (map[string]int, error) {
 	}
 
 	lineCounts := map[string]int{}
-	tree.Files().ForEach(func(f *object.File) error {
+	err = tree.Files().ForEach(func(f *object.File) error {
 		if f.Size > 1<<20 { // skip files >1MB
 			return nil
 		}
@@ -265,6 +339,9 @@ func CollectFileLineCounts(repo *git.Repository) (map[string]int, error) {
 		if err != nil {
 			return nil
 		}
+		if bytes.IndexByte(content[:min(len(content), binarySniffLen)], 0) >= 0 {
+			return nil // binary
+		}
 		lines := bytes.Count(content, []byte("\n"))
 		if len(content) > 0 && content[len(content)-1] != '\n' {
 			lines++ // count last line without trailing newline
@@ -272,6 +349,9 @@ func CollectFileLineCounts(repo *git.Repository) (map[string]int, error) {
 		lineCounts[f.Name] = lines
 		return nil
 	})
+	if err != nil {
+		return nil, err
+	}
 
 	return lineCounts, nil
 }
@@ -333,8 +413,8 @@ type BranchInfo struct {
 	IsCurrent  bool
 	LastCommit time.Time
 	Author     string
-	Ahead      int // commits ahead of default branch
-	Behind     int // commits behind default branch
+	Ahead      int // commits ahead of HEAD
+	Behind     int // commits behind HEAD
 	Stale      bool   // true if last commit is older than 90 days
 	RemoteGone bool   // true if upstream remote branch no longer exists
 	HasRemote  bool   // true if branch tracks a remote branch
@@ -346,11 +426,7 @@ func CollectBranches(repo *git.Repository, mm *Mailmap) ([]BranchInfo, error) {
 	if err != nil {
 		return nil, err
 	}
-	headCommit, err := repo.CommitObject(headRef.Hash())
-	if err != nil {
-		return nil, err
-	}
-	_ = headCommit
+	headGraph := loadCommitGraph(repo, headRef.Hash())
 
 	// Build a set of remote-tracking branch refs for quick lookup.
 	remoteRefs := map[string]bool{}
@@ -390,9 +466,7 @@ func CollectBranches(repo *git.Repository, mm *Mailmap) ([]BranchInfo, error) {
 		}
 
 		if ref.Hash() != headRef.Hash() {
-			ahead, behind := computeAheadBehind(repo, ref.Hash(), headRef.Hash())
-			bi.Ahead = ahead
-			bi.Behind = behind
+			bi.Ahead, bi.Behind = aheadBehind(repo, headGraph, ref.Hash())
 		}
 
 		// Check remote tracking status.
@@ -419,50 +493,77 @@ func CollectBranches(repo *git.Repository, mm *Mailmap) ([]BranchInfo, error) {
 	return result, nil
 }
 
-// computeAheadBehind counts commits ahead/behind between branch and base.
-func computeAheadBehind(repo *git.Repository, branchHash, baseHash plumbing.Hash) (ahead, behind int) {
-	branchCommit, err := repo.CommitObject(branchHash)
-	if err != nil {
-		return 0, 0
-	}
-	baseCommit, err := repo.CommitObject(baseHash)
-	if err != nil {
-		return 0, 0
-	}
+// commitGraph maps each commit reachable from some starting point to its
+// parents.
+type commitGraph map[plumbing.Hash][]plumbing.Hash
 
-	bases, err := branchCommit.MergeBase(baseCommit)
-	if err != nil || len(bases) == 0 {
-		return 0, 0
+// loadCommitGraph walks every commit reachable from the given hash. Commits
+// that cannot be read, such as those cut off by a shallow clone, are left out.
+func loadCommitGraph(repo *git.Repository, from plumbing.Hash) commitGraph {
+	g := commitGraph{}
+	seen := map[plumbing.Hash]bool{}
+	stack := []plumbing.Hash{from}
+	for len(stack) > 0 {
+		h := stack[len(stack)-1]
+		stack = stack[:len(stack)-1]
+		if seen[h] {
+			continue
+		}
+		seen[h] = true
+		c, err := repo.CommitObject(h)
+		if err != nil {
+			continue
+		}
+		g[h] = c.ParentHashes
+		stack = append(stack, c.ParentHashes...)
 	}
-	mergeBase := bases[0].Hash
+	return g
+}
 
-	// Count ahead: walk from branch to merge base.
-	iter, err := repo.Log(&git.LogOptions{From: branchHash})
-	if err != nil {
-		return 0, 0
+// countReachable returns how many commits in the graph are reachable from the
+// given hashes, the hashes themselves included.
+func (g commitGraph) countReachable(from []plumbing.Hash) int {
+	seen := map[plumbing.Hash]bool{}
+	stack := append([]plumbing.Hash(nil), from...)
+	for len(stack) > 0 {
+		h := stack[len(stack)-1]
+		stack = stack[:len(stack)-1]
+		parents, ok := g[h]
+		if !ok || seen[h] {
+			continue
+		}
+		seen[h] = true
+		stack = append(stack, parents...)
 	}
-	iter.ForEach(func(c *object.Commit) error {
-		if c.Hash == mergeBase {
-			return io.EOF
+	return len(seen)
+}
+
+// aheadBehind counts the commits reachable from branch but not from base
+// (ahead), and those reachable from base but not from branch (behind). Only
+// the commits base does not already have are read from the repository.
+func aheadBehind(repo *git.Repository, base commitGraph, branch plumbing.Hash) (ahead, behind int) {
+	var shared []plumbing.Hash // where the walk from branch meets base
+	seen := map[plumbing.Hash]bool{}
+	stack := []plumbing.Hash{branch}
+	for len(stack) > 0 {
+		h := stack[len(stack)-1]
+		stack = stack[:len(stack)-1]
+		if seen[h] {
+			continue
+		}
+		seen[h] = true
+		if _, ok := base[h]; ok {
+			shared = append(shared, h)
+			continue
+		}
+		c, err := repo.CommitObject(h)
+		if err != nil {
+			continue
 		}
 		ahead++
-		return nil
-	})
-
-	// Count behind: walk from base to merge base.
-	iter, err = repo.Log(&git.LogOptions{From: baseHash})
-	if err != nil {
-		return ahead, 0
+		stack = append(stack, c.ParentHashes...)
 	}
-	iter.ForEach(func(c *object.Commit) error {
-		if c.Hash == mergeBase {
-			return io.EOF
-		}
-		behind++
-		return nil
-	})
-
-	return ahead, behind
+	return ahead, len(base) - base.countReachable(shared)
 }
 
 // TagInfo holds metadata for a single tag/release.
@@ -525,24 +626,22 @@ func CollectTags(repo *git.Repository) ([]TagInfo, error) {
 	return tags, nil
 }
 
-// CountCommitsSince counts commits from HEAD that are after the given hash.
-func CountCommitsSince(repo *git.Repository, sinceHash string) int {
+// CommitsSinceLatestTag finds the newest tag reachable from HEAD and counts
+// the commits HEAD has on top of it. tags must be sorted newest first, as
+// CollectTags returns them. The name is empty if no tag is reachable.
+func CommitsSinceLatestTag(repo *git.Repository, tags []TagInfo) (name string, count int) {
 	ref, err := repo.Head()
 	if err != nil {
-		return 0
+		return "", 0
 	}
+	head := loadCommitGraph(repo, ref.Hash())
 
-	count := 0
-	iter, err := repo.Log(&git.LogOptions{From: ref.Hash()})
-	if err != nil {
-		return 0
-	}
-	iter.ForEach(func(c *object.Commit) error {
-		if c.Hash.String() == sinceHash {
-			return io.EOF
+	for _, t := range tags {
+		h := plumbing.NewHash(t.CommitHash)
+		if _, ok := head[h]; !ok {
+			continue
 		}
-		count++
-		return nil
-	})
-	return count
+		return t.Name, len(head) - head.countReachable([]plumbing.Hash{h})
+	}
+	return "", 0
 }
