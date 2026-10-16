@@ -41,7 +41,11 @@ go build -o gittop .
 ``` sh
 gittop               # visualize the current directory's Git repo
 gittop /path/to/repo
+gittop --version     # print the version
+gittop --help        # list flags
 ```
+
+Flags go before the path.
 
 When no path is given, GitTop also respects the `GIT_DIR` and `GIT_WORK_TREE` environment variables.
 

@@ -2,9 +2,12 @@ package main
 
 import (
 	"errors"
+	"flag"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/go-git/go-billy/v5/osfs"
@@ -87,20 +90,82 @@ func openExclusive(repo *git.Repository) (*git.Repository, func()) {
 	return exclusive, func() { stor.Close() }
 }
 
+// version is set at build time with -ldflags "-X main.version=...". When
+// empty, the version recorded by the Go toolchain is used.
+var version string
+
+// buildVersion returns the version to report for --version.
+func buildVersion() string {
+	if version != "" {
+		return version
+	}
+	info, ok := debug.ReadBuildInfo()
+	if !ok {
+		return "(devel)"
+	}
+	return info.Main.Version
+}
+
+// cliOptions holds the parsed command line.
+type cliOptions struct {
+	path    string // repository path, or "" if none was given
+	version bool
+}
+
+// parseArgs parses the command line, without the program name. Usage and
+// errors are written to out.
+func parseArgs(args []string, out io.Writer) (cliOptions, error) {
+	var opts cliOptions
+	fs := flag.NewFlagSet("gittop", flag.ContinueOnError)
+	fs.SetOutput(out)
+	fs.BoolVar(&opts.version, "version", false, "print the version and exit")
+	fs.Usage = func() {
+		fmt.Fprintf(out, "Usage: gittop [flags] [path]\n\n")
+		fmt.Fprintf(out, "Visualize the Git repository at path, or the current directory.\n\n")
+		fmt.Fprintf(out, "Flags:\n")
+		fs.PrintDefaults()
+	}
+	if err := fs.Parse(args); err != nil {
+		return opts, err
+	}
+	switch fs.NArg() {
+	case 0:
+	case 1:
+		opts.path = fs.Arg(0)
+	default:
+		err := fmt.Errorf("too many arguments: %q (flags go before the path)", fs.Args()[1:])
+		fmt.Fprintf(out, "%v\n", err)
+		fs.Usage()
+		return opts, err
+	}
+	return opts, nil
+}
+
 func main() {
-	path := "."
-	if len(os.Args) > 1 {
-		path = os.Args[1]
+	cli, err := parseArgs(os.Args[1:], os.Stderr)
+	if errors.Is(err, flag.ErrHelp) {
+		os.Exit(0)
+	}
+	if err != nil {
+		os.Exit(2)
+	}
+	if cli.version {
+		fmt.Printf("gittop %s\n", buildVersion())
+		return
+	}
+
+	path := cli.path
+	if path == "" {
+		path = "."
 	}
 
 	var repo *git.Repository
-	if len(os.Args) <= 1 {
+	if cli.path == "" {
 		if r, p, err := openFromEnv(); err == nil {
 			repo, path = r, p
 		}
 	}
 	if repo == nil {
-		var err error
 		repo, err = openRepository(path)
 		if errors.Is(err, git.ErrRepositoryNotExists) {
 			fmt.Fprintf(os.Stderr, "Error: not a git repository: %s\n", path)

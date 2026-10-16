@@ -30,7 +30,7 @@
             substituteInPlace go.mod --replace-fail 'go 1.27.0' 'go 1.26.0'
           '';
 
-          ldflags = [ "-s" "-w" ];
+          ldflags = [ "-s" "-w" "-X main.version=v${version}" ];
 
           meta = with pkgs.lib; {
             description = "A beautiful terminal UI for visualizing Git repository statistics";

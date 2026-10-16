@@ -1,8 +1,11 @@
 package main
 
 import (
+	"errors"
+	"flag"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -132,3 +135,42 @@ func TestOpenExclusive(t *testing.T) {
 		t.Errorf("CollectCommits returned %d commits, want 3", len(commits))
 	}
 }
+
+func TestParseArgs(t *testing.T) {
+	tests := []struct {
+		name    string
+		args    []string
+		want    cliOptions
+		wantErr error // nil, flag.ErrHelp, or errAny
+	}{
+		{"no args", nil, cliOptions{}, nil},
+		{"path", []string{"/repo"}, cliOptions{path: "/repo"}, nil},
+		{"version", []string{"--version"}, cliOptions{version: true}, nil},
+		{"single dash", []string{"-version"}, cliOptions{version: true}, nil},
+		{"help", []string{"--help"}, cliOptions{}, flag.ErrHelp},
+		{"unknown flag", []string{"--nope"}, cliOptions{}, errAny},
+		{"too many args", []string{"a", "b"}, cliOptions{path: "a"}, errAny},
+		{"flag after path", []string{"/repo", "--version"}, cliOptions{path: "/repo"}, errAny},
+	}
+	for _, tt := range tests {
+		var out strings.Builder
+		got, err := parseArgs(tt.args, &out)
+		switch {
+		case tt.wantErr == nil && err != nil:
+			t.Errorf("%s: unexpected error %v", tt.name, err)
+		case tt.wantErr == errAny && err == nil:
+			t.Errorf("%s: expected an error", tt.name)
+		case tt.wantErr == flag.ErrHelp && !errors.Is(err, flag.ErrHelp):
+			t.Errorf("%s: error = %v, want flag.ErrHelp", tt.name, err)
+		}
+		if err == nil && got != tt.want {
+			t.Errorf("%s: got %+v, want %+v", tt.name, got, tt.want)
+		}
+		if err != nil && !strings.Contains(out.String(), "Usage: gittop") {
+			t.Errorf("%s: usage not printed on error, got %q", tt.name, out.String())
+		}
+	}
+}
+
+// errAny marks a test case that expects some error.
+var errAny = errors.New("any error")
