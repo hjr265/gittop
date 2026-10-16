@@ -108,8 +108,9 @@ func buildVersion() string {
 
 // cliOptions holds the parsed command line.
 type cliOptions struct {
-	path    string // repository path, or "" if none was given
-	version bool
+	path       string // repository path, or "" if none was given
+	rangeLabel string // starting date range, or "" for the config's default
+	version    bool
 }
 
 // parseArgs parses the command line, without the program name. Usage and
@@ -118,6 +119,7 @@ func parseArgs(args []string, out io.Writer) (cliOptions, error) {
 	var opts cliOptions
 	fs := flag.NewFlagSet("gittop", flag.ContinueOnError)
 	fs.SetOutput(out)
+	fs.StringVar(&opts.rangeLabel, "range", "", "starting date range: "+rangeLabels()+" (default 1y, or default_range in the config file)")
 	fs.BoolVar(&opts.version, "version", false, "print the version and exit")
 	fs.Usage = func() {
 		fmt.Fprintf(out, "Usage: gittop [flags] [path]\n\n")
@@ -126,6 +128,12 @@ func parseArgs(args []string, out io.Writer) (cliOptions, error) {
 		fs.PrintDefaults()
 	}
 	if err := fs.Parse(args); err != nil {
+		return opts, err
+	}
+	if _, ok := rangeIndex(opts.rangeLabel); opts.rangeLabel != "" && !ok {
+		err := fmt.Errorf("invalid --range %q: want one of %s", opts.rangeLabel, rangeLabels())
+		fmt.Fprintf(out, "%v\n", err)
+		fs.Usage()
 		return opts, err
 	}
 	switch fs.NArg() {
@@ -177,7 +185,7 @@ func main() {
 		}
 	}
 
-	m := newModel(repo, path)
+	m := newModel(repo, path, cli.rangeLabel)
 	opts := []tea.ProgramOption{tea.WithAltScreen()}
 	if m.mouse {
 		opts = append(opts, tea.WithMouseCellMotion())

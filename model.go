@@ -54,6 +54,10 @@ type model struct {
 	// Global date range.
 	rangeIdx int
 
+	// config is the config as loaded, so saving keeps settings the options
+	// menu does not manage.
+	config Config
+
 	// Branch data.
 	branchesLoaded  bool
 	branchesLoading bool
@@ -109,13 +113,21 @@ type commitsDataMsg struct {
 	shallow  bool
 }
 
-func newModel(repo *git.Repository, path string) model {
+// newModel returns the model for repo. rangeLabel, if not empty, overrides
+// the config's default_range.
+func newModel(repo *git.Repository, path, rangeLabel string) model {
 	ti := textinput.New()
 	ti.Placeholder = `author:"name" and ("fix" or "bug") and path:*.go and branch:main`
 	ti.CharLimit = 256
 	ti.Width = 80
 
 	cfg := LoadConfig()
+	rangeIdx := defaultRangeIdx
+	for _, label := range []string{cfg.DefaultRange, rangeLabel} {
+		if i, ok := rangeIndex(label); ok {
+			rangeIdx = i
+		}
+	}
 	theme := ResolveTheme(cfg)
 	ApplyTheme(theme)
 	if cfg.Truecolor {
@@ -128,7 +140,8 @@ func newModel(repo *git.Repository, path string) model {
 		repoPath:    path,
 		loading:     true,
 		activeTab:   TabSummary,
-		rangeIdx:    defaultRangeIdx,
+		rangeIdx:    rangeIdx,
+		config:      cfg,
 		filterInput: ti,
 		theme:       theme,
 		truecolor:   cfg.Truecolor,

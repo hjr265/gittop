@@ -151,6 +151,9 @@ func TestParseArgs(t *testing.T) {
 		{"unknown flag", []string{"--nope"}, cliOptions{}, errAny},
 		{"too many args", []string{"a", "b"}, cliOptions{path: "a"}, errAny},
 		{"flag after path", []string{"/repo", "--version"}, cliOptions{path: "/repo"}, errAny},
+		{"range", []string{"--range", "2y", "/repo"}, cliOptions{path: "/repo", rangeLabel: "2y"}, nil},
+		{"range any case", []string{"--range=ALL"}, cliOptions{rangeLabel: "ALL"}, nil},
+		{"invalid range", []string{"--range", "7y"}, cliOptions{}, errAny},
 	}
 	for _, tt := range tests {
 		var out strings.Builder

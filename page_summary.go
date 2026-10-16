@@ -26,6 +26,26 @@ var rangePresets = []timeRange{
 
 const defaultRangeIdx = 2 // 1y
 
+// rangeIndex returns the index of the preset with the given label, ignoring
+// case.
+func rangeIndex(label string) (int, bool) {
+	for i, r := range rangePresets {
+		if strings.EqualFold(r.label, label) {
+			return i, true
+		}
+	}
+	return 0, false
+}
+
+// rangeLabels returns the preset labels, for help and error messages.
+func rangeLabels() string {
+	labels := make([]string, len(rangePresets))
+	for i, r := range rangePresets {
+		labels[i] = r.label
+	}
+	return strings.Join(labels, ", ")
+}
+
 type summaryPage struct {
 	stats        []DayStat
 	granularity  Granularity

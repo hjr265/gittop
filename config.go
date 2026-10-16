@@ -15,7 +15,10 @@ type Config struct {
 	Truecolor   bool   `toml:"truecolor"`    // true = 24-bit, false = 256-color
 	GraphSymbol string `toml:"graph_symbol"` // "braille" or "block"
 	Mouse       bool   `toml:"mouse"`        // wheel scrolling and tab clicks
-	CustomTheme *Theme `toml:"custom_theme,omitempty"`
+	// DefaultRange is the date range at startup: "3m", "6m", "1y", "2y",
+	// "5y", or "all". Empty or unknown values mean "1y".
+	DefaultRange string `toml:"default_range,omitempty"`
+	CustomTheme  *Theme `toml:"custom_theme,omitempty"`
 }
 
 func defaultConfig() Config {
@@ -72,16 +75,17 @@ func (cfg Config) GraphSymbolValue() GraphSymbol {
 	return GraphBraille
 }
 
-// ToConfig extracts current settings into a Config.
+// ToConfig extracts current settings into a Config. Settings the options
+// menu does not manage, such as the custom theme, keep their loaded values.
 func (m model) ToConfig() Config {
 	sym := "braille"
 	if m.graphSymbol == GraphBlock {
 		sym = "block"
 	}
-	return Config{
-		ThemeName:   strings.ToLower(m.theme.Name),
-		Truecolor:   m.truecolor,
-		GraphSymbol: sym,
-		Mouse:       m.mouse,
-	}
+	cfg := m.config
+	cfg.ThemeName = strings.ToLower(m.theme.Name)
+	cfg.Truecolor = m.truecolor
+	cfg.GraphSymbol = sym
+	cfg.Mouse = m.mouse
+	return cfg
 }

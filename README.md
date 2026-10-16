@@ -41,11 +41,16 @@ go build -o gittop .
 ``` sh
 gittop               # visualize the current directory's Git repo
 gittop /path/to/repo
+gittop --range all   # start with the full history instead of the last year
 gittop --version     # print the version
 gittop --help        # list flags
 ```
 
-Flags go before the path.
+Flags go before the path. `--range` takes `3m`, `6m`, `1y`, `2y`, `5y`, or `all`. To change the starting range for every run, set `default_range` in GitTop's config file (`~/.config/gittop/config.toml` on Linux):
+
+``` toml
+default_range = "all"
+```
 
 When no path is given, GitTop also respects the `GIT_DIR` and `GIT_WORK_TREE` environment variables.
 
