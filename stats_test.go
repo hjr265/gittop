@@ -631,6 +631,34 @@ func TestCommitsToDailyStats(t *testing.T) {
 			t.Errorf("first date = %v, want 2025-06-15", got[0].Date)
 		}
 	})
+
+	t.Run("future commits count as today", func(t *testing.T) {
+		today := truncateToDay(time.Now())
+		commits := []CommitInfo{
+			{Date: today.AddDate(0, 0, -1)},
+			{Date: today},
+			{Date: today.AddDate(0, 0, 1)},  // author's timezone is ahead
+			{Date: today.AddDate(60, 0, 0)}, // clock set wrong
+		}
+		got := CommitsToDailyStats(commits)
+		want := []int{1, 3}
+		if len(got) != len(want) {
+			t.Fatalf("len = %d, want %d", len(got), len(want))
+		}
+		for i, s := range got {
+			if s.Count != want[i] {
+				t.Errorf("got[%d].Count = %d, want %d", i, s.Count, want[i])
+			}
+		}
+	})
+
+	t.Run("only future commits", func(t *testing.T) {
+		today := truncateToDay(time.Now())
+		got := CommitsToDailyStats([]CommitInfo{{Date: today.AddDate(0, 0, 2)}})
+		if len(got) != 1 || !got[0].Date.Equal(today) || got[0].Count != 1 {
+			t.Errorf("got %v, want one commit today", got)
+		}
+	})
 }
 
 func TestAggregateStats(t *testing.T) {

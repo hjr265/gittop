@@ -190,16 +190,23 @@ func CommitsToDailyStats(commits []CommitInfo) []DayStat {
 		return nil
 	}
 
+	// Commits dated after today count as today. Dates are the author's local
+	// date, so a commit made moments ago in a timezone ahead of ours can be
+	// dated tomorrow; clocks set wrong can be years ahead.
+	now := truncateToDay(time.Now())
 	counts := make(map[time.Time]int)
 	var earliest time.Time
 	for _, c := range commits {
-		counts[c.Date]++
-		if earliest.IsZero() || c.Date.Before(earliest) {
-			earliest = c.Date
+		d := c.Date
+		if d.After(now) {
+			d = now
+		}
+		counts[d]++
+		if earliest.IsZero() || d.Before(earliest) {
+			earliest = d
 		}
 	}
 
-	now := truncateToDay(time.Now())
 	var stats []DayStat
 	for d := earliest; !d.After(now); d = d.AddDate(0, 0, 1) {
 		stats = append(stats, DayStat{Date: d, Count: counts[d]})
