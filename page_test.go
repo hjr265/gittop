@@ -1,8 +1,10 @@
 package main
 
 import (
+	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -27,6 +29,72 @@ func TestPageStep(t *testing.T) {
 		got := pageStep(tt.key, tt.rows)
 		if got != tt.want {
 			t.Errorf("pageStep(%q, %d) = %d, want %d", tt.key, tt.rows, got, tt.want)
+		}
+	}
+}
+
+func TestResampleCounts(t *testing.T) {
+	counts := func(cs ...int) []DayStat {
+		stats := make([]DayStat, len(cs))
+		for i, c := range cs {
+			stats[i] = DayStat{Count: c}
+		}
+		return stats
+	}
+	tests := []struct {
+		name  string
+		stats []DayStat
+		slots int
+		want  []float64
+	}{
+		{"empty", nil, 4, nil},
+		{"no slots", counts(1, 2), 0, nil},
+		{"exact fit", counts(1, 2, 3), 3, []float64{1, 2, 3}},
+		{"stretch evenly", counts(1, 2), 4, []float64{1, 1, 2, 2}},
+		{"stretch unevenly", counts(1, 2, 3), 4, []float64{1, 2, 3, 3}},
+		{"squeeze evenly", counts(1, 3, 2, 6), 2, []float64{2, 4}},
+		{"squeeze unevenly", counts(3, 1, 2, 4, 6), 2, []float64{2, 4}},
+	}
+	for _, tt := range tests {
+		got := resampleCounts(tt.stats, tt.slots)
+		if !slices.Equal(got, tt.want) {
+			t.Errorf("resampleCounts [%s] = %v, want %v", tt.name, got, tt.want)
+		}
+	}
+}
+
+func TestFormatAxisValue(t *testing.T) {
+	tests := []struct {
+		v    float64
+		want string
+	}{
+		{0, "0"},
+		{4, "4"},
+		{2.5, "2.5"},
+		{0.25, "0.2"},
+		{12.4, "12"},
+	}
+	for _, tt := range tests {
+		if got := formatAxisValue(tt.v); got != tt.want {
+			t.Errorf("formatAxisValue(%v) = %q, want %q", tt.v, got, tt.want)
+		}
+	}
+}
+
+func TestBarChartFillsWidth(t *testing.T) {
+	ApplyTheme(DefaultTheme())
+	stats := []DayStat{
+		{Date: time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC), Count: 1},
+		{Date: time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC), Count: 1},
+		{Date: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), Count: 1},
+	}
+	const width = 60
+	for _, symbol := range []GraphSymbol{GraphBlock, GraphBraille} {
+		lines := strings.Split(renderBarChart(stats, GranularityYearly, width, 12, symbol), "\n")
+		// lines[2] is the top chart row: "  " + 3-wide axis label + " ┤" + cells.
+		got := lipgloss.Width(strings.TrimRight(lines[2], " ")) - 7
+		if got != width-chartPadding {
+			t.Errorf("symbol %d: chart is %d cells wide, want %d", symbol, got, width-chartPadding)
 		}
 	}
 }

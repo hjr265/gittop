@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
@@ -107,8 +108,8 @@ func smoothBar(value, maxValue, maxWidth int, style lipgloss.Style) (string, int
 var vBlockChars = []string{" ", "▁", "▂", "▃", "▄", "▅", "▆", "▇", "█"}
 
 // renderBarChart renders an area chart of commit stats.
-func renderBarChart(allStats []DayStat, granularity Granularity, width, height int, symbol GraphSymbol) string {
-	if len(allStats) == 0 {
+func renderBarChart(stats []DayStat, granularity Granularity, width, height int, symbol GraphSymbol) string {
+	if len(stats) == 0 {
 		return "\n  No commit data."
 	}
 
@@ -124,11 +125,8 @@ func renderBarChart(allStats []DayStat, granularity Granularity, width, height i
 		pointsPerCell = 2
 		subRows = 4
 	}
-	maxDataPoints := cols * pointsPerCell
-	stats := allStats
-	if len(stats) > maxDataPoints {
-		stats = stats[len(stats)-maxDataPoints:]
-	}
+	slots := cols * pointsPerCell
+	values := resampleCounts(stats, slots)
 
 	chartHeight := height - 5 // subtitle + padding + x-axis + months + footer
 	if chartHeight < 3 {
@@ -150,20 +148,22 @@ func renderBarChart(allStats []DayStat, granularity Granularity, width, height i
 			peakDate = s.Date
 		}
 	}
-	if maxCount == 0 {
-		maxCount = 1
+
+	maxValue := 0.0
+	for _, v := range values {
+		maxValue = max(maxValue, v)
+	}
+	if maxValue == 0 {
+		maxValue = 1
 	}
 
-	// Scale each data point to dot-row units.
-	dotHeights := make([]int, len(stats))
-	for i, s := range stats {
-		dotHeights[i] = s.Count * totalDotRows / maxCount
+	// Scale each slot to dot-row units.
+	dotHeights := make([]int, len(values))
+	for i, v := range values {
+		dotHeights[i] = int(v * float64(totalDotRows) / maxValue)
 	}
 
-	charCols := len(stats)
-	if symbol == GraphBraille {
-		charCols = (len(stats) + 1) / 2
-	}
+	charCols := cols
 
 	// Row gradient styles (row 0 = top of chart).
 	rowStyles := make([]lipgloss.Style, chartHeight)
@@ -175,10 +175,9 @@ func renderBarChart(allStats []DayStat, granularity Granularity, width, height i
 		rowStyles[r] = lipgloss.NewStyle().Foreground(chartGradient[ci])
 	}
 
-	axisWidth := len(fmt.Sprintf("%d", maxCount))
-	if axisWidth < 3 {
-		axisWidth = 3
-	}
+	topLabel := formatAxisValue(maxValue)
+	midLabel := formatAxisValue(maxValue / 2)
+	axisWidth := max(len(topLabel), len(midLabel), 3)
 
 	var b strings.Builder
 
@@ -202,11 +201,11 @@ func renderBarChart(allStats []DayStat, granularity Granularity, width, height i
 		// Y-axis label.
 		label := ""
 		if r == 0 {
-			label = fmt.Sprintf("%d", maxCount)
+			label = topLabel
 		} else if r == chartHeight-1 {
 			label = "0"
 		} else if r == chartHeight/2 {
-			label = fmt.Sprintf("%d", maxCount/2)
+			label = midLabel
 		}
 
 		b.WriteString(fmt.Sprintf("  %*s ", axisWidth, label))
@@ -292,7 +291,7 @@ func renderBarChart(allStats []DayStat, granularity Granularity, width, height i
 			}
 		}
 
-		charPos := i / pointsPerCell
+		charPos := i * slots / len(stats) / pointsPerCell
 		if showLabel && charPos-lastLabel >= len(label)+1 {
 			for j := 0; j < len(label) && charPos+j < len(monthLine); j++ {
 				monthLine[charPos+j] = label[j]
@@ -319,6 +318,43 @@ func renderBarChart(allStats []DayStat, granularity Granularity, width, height i
 		totalCommits, len(stats), granularity, peakStr)))
 
 	return b.String()
+}
+
+// resampleCounts maps stats onto exactly slots values so the chart fills its
+// width. With fewer stats than slots, each stat spans a run of slots. With
+// more, each slot holds the mean of the stats that fall into it.
+func resampleCounts(stats []DayStat, slots int) []float64 {
+	n := len(stats)
+	if n == 0 || slots <= 0 {
+		return nil
+	}
+	values := make([]float64, slots)
+	if n <= slots {
+		for i, s := range stats {
+			for j := i * slots / n; j < (i+1)*slots/n; j++ {
+				values[j] = float64(s.Count)
+			}
+		}
+		return values
+	}
+	for j := range values {
+		lo, hi := j*n/slots, (j+1)*n/slots
+		sum := 0
+		for _, s := range stats[lo:hi] {
+			sum += s.Count
+		}
+		values[j] = float64(sum) / float64(hi-lo)
+	}
+	return values
+}
+
+// formatAxisValue formats a y-axis label, keeping one decimal for small
+// fractional values such as averaged counts.
+func formatAxisValue(v float64) string {
+	if v == math.Trunc(v) || v >= 10 {
+		return fmt.Sprintf("%.0f", v)
+	}
+	return fmt.Sprintf("%.1f", v)
 }
 
 // pageStep returns how many rows a paging key moves a list that shows rows
