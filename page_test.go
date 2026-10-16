@@ -99,6 +99,28 @@ func TestBarChartFillsWidth(t *testing.T) {
 	}
 }
 
+func TestBarChartLabelsNotClipped(t *testing.T) {
+	ApplyTheme(DefaultTheme())
+	// 17 years stretched over 50 columns puts the last label at the right edge.
+	var stats []DayStat
+	for y := 1970; y <= 1986; y++ {
+		stats = append(stats, DayStat{Date: time.Date(y, 1, 1, 0, 0, 0, 0, time.UTC), Count: 1})
+	}
+	lines := strings.Split(renderBarChart(stats, GranularityYearly, 60, 12, GraphBlock), "\n")
+	for _, line := range lines {
+		if !strings.Contains(line, "1970") {
+			continue
+		}
+		for _, label := range strings.Fields(line) {
+			if len(label) != 4 {
+				t.Errorf("clipped label %q in %q", label, line)
+			}
+		}
+		return
+	}
+	t.Fatal("label line not found")
+}
+
 func TestCommitsPagePaging(t *testing.T) {
 	p := newCommitsPage(nil)
 	p.Update(commitsDataMsg{commits: make([]CommitInfo, 100)})

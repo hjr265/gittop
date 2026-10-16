@@ -292,10 +292,10 @@ func renderBarChart(stats []DayStat, granularity Granularity, width, height int,
 		}
 
 		charPos := i * slots / len(stats) / pointsPerCell
-		if showLabel && charPos-lastLabel >= len(label)+1 {
-			for j := 0; j < len(label) && charPos+j < len(monthLine); j++ {
-				monthLine[charPos+j] = label[j]
-			}
+		// Skip labels that would collide with the previous one or run past
+		// the right edge.
+		if showLabel && charPos-lastLabel >= len(label)+1 && charPos+len(label) <= len(monthLine) {
+			copy(monthLine[charPos:], label)
 			lastLabel = charPos
 		}
 	}
