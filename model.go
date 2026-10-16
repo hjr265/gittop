@@ -163,7 +163,9 @@ func (m model) Init() tea.Cmd {
 func loadCommits(repo *git.Repository) tea.Cmd {
 	return func() tea.Msg {
 		mm := LoadMailmap(repo)
-		commits, err := CollectCommits(repo, mm)
+		walkRepo, done := openExclusive(repo)
+		commits, err := CollectCommits(walkRepo, mm)
+		done()
 		branch := ""
 		if ref, e := repo.Head(); e == nil {
 			if ref.Name().IsBranch() {
@@ -197,6 +199,8 @@ func (m model) pageCapturesKeys() bool {
 func (m model) loadCommitFiles() tea.Cmd {
 	repo, mm, commits := m.repo, m.mailmap, m.commits
 	return func() tea.Msg {
+		repo, done := openExclusive(repo)
+		defer done()
 		if commits == nil {
 			// The first scan has not finished yet, so walk the history here.
 			if mm == nil {

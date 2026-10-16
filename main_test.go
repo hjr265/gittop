@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing"
@@ -76,5 +77,58 @@ func TestOpenRepositoryLinkedWorktree(t *testing.T) {
 	}
 	if len(commits) != 1 {
 		t.Errorf("CollectCommits returned %d commits, want 1", len(commits))
+	}
+
+	// The exclusive handle must still see the linked worktree's HEAD.
+	exclusive, done := openExclusive(opened)
+	defer done()
+	if head, err := exclusive.Head(); err != nil || head.Name() != feature {
+		t.Errorf("exclusive HEAD = %v (err %v), want %s", head, err, feature)
+	}
+}
+
+func TestOpenExclusive(t *testing.T) {
+	dir := t.TempDir()
+	repo, err := git.PlainInit(dir, false)
+	if err != nil {
+		t.Fatalf("PlainInit error: %v", err)
+	}
+	wt, err := repo.Worktree()
+	if err != nil {
+		t.Fatalf("Worktree error: %v", err)
+	}
+	for i, msg := range []string{"A", "B", "C"} {
+		if err := os.WriteFile(filepath.Join(dir, "a.txt"), []byte(msg+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := wt.Add("a.txt"); err != nil {
+			t.Fatalf("Add error: %v", err)
+		}
+		if _, err := wt.Commit(msg, &git.CommitOptions{
+			Author: &object.Signature{Name: "Test Author", Email: "test@example.com", When: time.Unix(int64(i)*86400, 0)},
+		}); err != nil {
+			t.Fatalf("Commit error: %v", err)
+		}
+	}
+	// Move the objects into a pack, which is where kept descriptors apply.
+	if err := repo.RepackObjects(&git.RepackConfig{}); err != nil {
+		t.Fatalf("RepackObjects error: %v", err)
+	}
+
+	opened, err := openRepository(dir)
+	if err != nil {
+		t.Fatalf("openRepository error: %v", err)
+	}
+	exclusive, done := openExclusive(opened)
+	defer done()
+	if exclusive == opened {
+		t.Fatal("openExclusive returned the shared handle")
+	}
+	commits, err := CollectCommits(exclusive, LoadMailmap(exclusive))
+	if err != nil {
+		t.Fatalf("CollectCommits error: %v", err)
+	}
+	if len(commits) != 3 {
+		t.Errorf("CollectCommits returned %d commits, want 3", len(commits))
 	}
 }

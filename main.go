@@ -68,6 +68,25 @@ func openRepository(path string) (*git.Repository, error) {
 	return nil, err
 }
 
+// openExclusive returns a second handle on repo for use by a single
+// goroutine, with pack files kept open between object reads. Reopening a pack
+// for every object roughly doubles the time to walk a large history. Kept
+// pack files are not safe for concurrent use, so the handle must not be
+// shared. Call the returned close function when done. Repositories not
+// backed by the filesystem are returned as is.
+func openExclusive(repo *git.Repository) (*git.Repository, func()) {
+	s, ok := repo.Storer.(*filesystem.Storage)
+	if !ok {
+		return repo, func() {}
+	}
+	stor := filesystem.NewStorageWithOptions(s.Filesystem(), cache.NewObjectLRUDefault(), filesystem.Options{KeepDescriptors: true})
+	exclusive, err := git.Open(stor, nil)
+	if err != nil {
+		return repo, func() {}
+	}
+	return exclusive, func() { stor.Close() }
+}
+
 func main() {
 	path := "."
 	if len(os.Args) > 1 {
